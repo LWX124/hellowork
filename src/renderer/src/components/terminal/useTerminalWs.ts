@@ -1,11 +1,13 @@
 // src/renderer/src/components/terminal/useTerminalWs.ts
 import { useEffect, useRef, useState } from 'react'
 import { useServiceStore } from '../../store/service'
+import { useWorkspaceStore } from '../../store/workspace'
 
-export function useTerminalWs(machineId: string) {
+export function useTerminalWs(machineId: string, tabId: string) {
   const send = useServiceStore(s => s.send)
   const onMessage = useServiceStore(s => s.onMessage)
   const connected = useServiceStore(s => s.connected)
+  const setTabSessionId = useWorkspaceStore(s => s.setTabSessionId)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
@@ -19,6 +21,7 @@ export function useTerminalWs(machineId: string) {
       if (msg.type === 'session:created' && !sessionIdRef.current) {
         sessionIdRef.current = msg.sessionId
         setSessionId(msg.sessionId)
+        setTabSessionId(tabId, msg.sessionId)
       }
       if (msg.type === 'session:error') {
         setError(msg.message)

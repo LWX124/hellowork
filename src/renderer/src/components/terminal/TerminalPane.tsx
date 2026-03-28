@@ -8,16 +8,17 @@ import { useTerminalWs } from './useTerminalWs'
 import '@xterm/xterm/css/xterm.css'
 
 interface Props {
+  tabId: string
   machineId: string
   isActive: boolean
 }
 
-export function TerminalPane({ machineId, isActive }: Props) {
+export function TerminalPane({ tabId, machineId, isActive }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const pendingRef = useRef<string[]>([])
-  const { sessionId, error, writeInput, resize } = useTerminalWs(machineId)
+  const { sessionId, error, writeInput, resize } = useTerminalWs(machineId, tabId)
   const onMessage = useServiceStore(s => s.onMessage)
 
   useEffect(() => {
@@ -62,7 +63,6 @@ export function TerminalPane({ machineId, isActive }: Props) {
         if (isActive && termRef.current) {
           termRef.current.write(msg.data)
         } else {
-          // Buffer output while inactive
           pendingRef.current.push(msg.data)
         }
       }
@@ -70,7 +70,6 @@ export function TerminalPane({ machineId, isActive }: Props) {
     return unsub
   }, [sessionId, isActive, onMessage])
 
-  // Flush pending output when becoming active
   useEffect(() => {
     if (isActive && termRef.current && pendingRef.current.length > 0) {
       const pending = pendingRef.current.splice(0)
