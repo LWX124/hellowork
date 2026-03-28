@@ -266,7 +266,8 @@ interface Machine {
 { type: 'session:created', sessionId: string }
 { type: 'session:error', sessionId: string, message: string }
 { type: 'tunnel:opened', tunnelId: string, localPort: number }
-{ type: 'connection:status', machineId: string, status: 'connected'|'disconnected' }
+{ type: 'tunnel:error', tunnelId: string, message: string }
+{ type: 'connection:status', machineId: string, status: 'connected'|'disconnected'|'error', message?: string }
 ```
 
 ---
