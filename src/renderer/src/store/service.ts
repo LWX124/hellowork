@@ -1,13 +1,16 @@
 // src/renderer/store/service.ts
 import { create } from 'zustand'
 
+type MessageHandler = (msg: any) => void
+const globalHandlers = new Set<MessageHandler>()
+
 interface ServiceState {
   port: number | null
   ws: WebSocket | null
   connected: boolean
   connect: () => Promise<void>
   send: (msg: object) => void
-  onMessage: (handler: (msg: any) => void) => () => void
+  onMessage: (handler: MessageHandler) => () => void
 }
 
 export const useServiceStore = create<ServiceState>((set, get) => ({
@@ -26,6 +29,12 @@ export const useServiceStore = create<ServiceState>((set, get) => ({
       setTimeout(() => get().connect(), 1000)
     }
     ws.onerror = (err) => console.error('[ws] error', err)
+    ws.onmessage = (e: MessageEvent) => {
+      try {
+        const msg = JSON.parse(e.data)
+        globalHandlers.forEach(h => h(msg))
+      } catch {}
+    }
   },
 
   send: (msg) => {
@@ -34,12 +43,7 @@ export const useServiceStore = create<ServiceState>((set, get) => ({
   },
 
   onMessage: (handler) => {
-    const { ws } = get()
-    if (!ws) return () => {}
-    const listener = (e: MessageEvent) => {
-      try { handler(JSON.parse(e.data)) } catch {}
-    }
-    ws.addEventListener('message', listener)
-    return () => ws.removeEventListener('message', listener)
+    globalHandlers.add(handler)
+    return () => globalHandlers.delete(handler)
   },
 }))

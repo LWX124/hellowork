@@ -1,6 +1,7 @@
 // src/renderer/src/components/preview/PreviewPane.tsx
 import { useRef, useState, useEffect } from 'react'
 import { useServiceStore } from '../../store/service'
+import { useMachinesStore } from '../../store/machines'
 import { toast } from '../common/Toast'
 
 export function PreviewPane() {
@@ -10,13 +11,10 @@ export function PreviewPane() {
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const { send, onMessage } = useServiceStore()
-  const [machineOptions, setMachineOptions] = useState<Array<{id: string, name: string}>>([])
+  const machines = useMachinesStore(s => s.machines)
 
   useEffect(() => {
     const unsub = onMessage((msg) => {
-      if (msg.type === 'machine:list:result') {
-        setMachineOptions(msg.machines.map((m: any) => ({ id: m.id, name: m.name })))
-      }
       if (msg.type === 'tunnel:opened') {
         setTunnelId(msg.tunnelId)
         setLocalPort(msg.localPort)
@@ -25,9 +23,8 @@ export function PreviewPane() {
         toast.error(`端口转发失败：${msg.message}`)
       }
     })
-    send({ type: 'machine:list' })
     return unsub
-  }, [onMessage, send])
+  }, [onMessage])
 
   const handleOpen = () => {
     const port = parseInt(portInput)
@@ -81,7 +78,7 @@ export function PreviewPane() {
           onChange={e => setActiveMachineId(e.target.value || null)}
         >
           <option value="">选择机器</option>
-          {machineOptions.map(m => (
+          {machines.map(m => (
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>

@@ -11,14 +11,16 @@ export function useTerminalWs(machineId: string, tabId: string) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const requestIdRef = useRef<string>(crypto.randomUUID())
 
   useEffect(() => {
     if (!connected || !machineId) return
 
-    send({ type: 'session:create', machineId })
+    const requestId = requestIdRef.current
+    send({ type: 'session:create', machineId, requestId })
 
     const unsub = onMessage((msg) => {
-      if (msg.type === 'session:created' && !sessionIdRef.current) {
+      if (msg.type === 'session:created' && msg.requestId === requestId && !sessionIdRef.current) {
         sessionIdRef.current = msg.sessionId
         setSessionId(msg.sessionId)
         setTabSessionId(tabId, msg.sessionId)

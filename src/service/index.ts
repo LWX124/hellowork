@@ -58,7 +58,7 @@ wss.on('connection', (ws) => {
           const sessionId = await sessions.create(client, (sid, data) => {
             send(ws, { type: 'terminal:output', sessionId: sid, data })
           })
-          send(ws, { type: 'session:created', sessionId })
+          send(ws, { type: 'session:created', sessionId, requestId: msg.requestId })
         } catch (err: any) {
           send(ws, { type: 'session:error', sessionId: '', message: err.message })
         }

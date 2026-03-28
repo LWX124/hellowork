@@ -1,7 +1,7 @@
 // src/service/types.ts
 
 export type ClientMessage =
-  | { type: 'session:create'; machineId: string }
+  | { type: 'session:create'; machineId: string; requestId: string }
   | { type: 'session:close'; sessionId: string }
   | { type: 'terminal:input'; sessionId: string; data: string }
   | { type: 'terminal:resize'; sessionId: string; cols: number; rows: number }
@@ -18,7 +18,7 @@ export type ClientMessage =
   | { type: 'hostkey:reject'; machineId: string }
 
 export type ServerMessage =
-  | { type: 'session:created'; sessionId: string }
+  | { type: 'session:created'; sessionId: string; requestId: string }
   | { type: 'session:error'; sessionId: string; message: string }
   | { type: 'terminal:output'; sessionId: string; data: string }
   | { type: 'tunnel:opened'; tunnelId: string; localPort: number }

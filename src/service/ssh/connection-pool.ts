@@ -11,6 +11,7 @@ type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 interface PoolEntry {
   client: Client
   status: ConnectionStatus
+  onStatus: StatusCallback
   approveResolve?: (approved: boolean) => void
 }
 
@@ -48,7 +49,7 @@ export class ConnectionPool {
     if (existing && (existing.status === 'connected' || existing.status === 'connecting')) return
 
     const client = new Client()
-    const entry: PoolEntry = { client, status: 'connecting' }
+    const entry: PoolEntry = { client, status: 'connecting', onStatus }
     this.pool.set(machine.id, entry)
     onStatus(machine.id, 'connecting')
 
@@ -107,10 +108,12 @@ export class ConnectionPool {
       })
       .on('error', (err) => {
         const e = this.pool.get(machine.id)
-        if (e) e.status = 'error'
+        if (!e) return   // already cleaned up (e.g., by rejectHostKey)
+        e.status = 'error'
         onStatus(machine.id, 'error', err.message)
       })
       .on('close', () => {
+        if (!this.pool.has(machine.id)) return  // already cleaned up
         this.pool.delete(machine.id)
         onStatus(machine.id, 'disconnected')
       })
@@ -129,8 +132,13 @@ export class ConnectionPool {
   rejectHostKey(machineId: string): void {
     const entry = this.pool.get(machineId)
     if (entry?.approveResolve) {
-      entry.approveResolve(false)
+      const cb = entry.approveResolve
       entry.approveResolve = undefined
+      // Mark as disconnected before ssh2 fires its error event
+      entry.status = 'disconnected'
+      this.pool.delete(machineId)
+      entry.onStatus(machineId, 'disconnected')
+      cb(false)   // triggers ssh2 to abort, but pool entry is already removed
     }
   }
 
@@ -138,7 +146,7 @@ export class ConnectionPool {
     const entry = this.pool.get(machineId)
     if (!entry) return
     entry.client.end()
-    this.pool.delete(machineId)
+    // Don't delete here — let the 'close' event handler delete and notify
   }
 
   getClient(machineId: string): Client | undefined {
