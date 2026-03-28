@@ -95,6 +95,52 @@ wss.on('connection', (ws) => {
       case 'tunnel:close':
         tunnels.close(msg.tunnelId)
         break
+
+      case 'machine:list':
+        send(ws, { type: 'machine:list:result', machines: store.getAll() })
+        break
+
+      case 'machine:save':
+        store.save(msg.machine)
+        send(ws, { type: 'machine:saved', machine: msg.machine })
+        break
+
+      case 'machine:delete':
+        store.delete(msg.id)
+        pool.disconnect(msg.id)
+        send(ws, { type: 'machine:deleted', id: msg.id })
+        break
+
+      case 'machine:connect': {
+        const machine = store.getById(msg.machineId)
+        if (!machine) {
+          send(ws, { type: 'connection:status', machineId: msg.machineId, status: 'error', message: 'Machine not found' })
+          return
+        }
+        if (pool.getStatus(msg.machineId) === 'connected' || pool.getStatus(msg.machineId) === 'connecting') {
+          send(ws, { type: 'connection:status', machineId: msg.machineId, status: pool.getStatus(msg.machineId) as any })
+          return
+        }
+        ;(pool.connect as any)(machine, (machineId: string, status: any, message?: string) => {
+          send(ws, { type: 'connection:status', machineId, status, message })
+        }, msg.password,
+        (machineId: string, host: string, fingerprint: string) => {
+          send(ws, { type: 'hostkey:verify', machineId, host, fingerprint })
+        })
+        break
+      }
+
+      case 'machine:disconnect':
+        pool.disconnect(msg.machineId)
+        break
+
+      case 'hostkey:approve':
+        ;(pool as any).approveHostKey(msg.machineId)
+        break
+
+      case 'hostkey:reject':
+        ;(pool as any).rejectHostKey(msg.machineId)
+        break
     }
   })
 })
