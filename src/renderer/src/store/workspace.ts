@@ -1,6 +1,5 @@
 // src/renderer/src/store/workspace.ts
 import { create } from 'zustand'
-import { randomUUID } from 'crypto'
 
 export interface TerminalTab {
   id: string
@@ -33,7 +32,7 @@ interface WorkspaceState {
   togglePreview: () => void
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, _get) => ({
   tabs: [],
   activeTabId: null,
   splitMode: 'none',
@@ -46,7 +45,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   init: () => {},
 
   addTab: (machineId, title) => {
-    const id = randomUUID()
+    const id = crypto.randomUUID()
     const tab: TerminalTab = { id, machineId, title }
     set(s => ({ tabs: [...s.tabs, tab], activeTabId: id }))
   },
@@ -72,7 +71,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   addSplitTab: (machineId, title) => {
-    const id = randomUUID()
+    const id = crypto.randomUUID()
     set(s => ({ splitTabs: [...s.splitTabs, { id, machineId, title }], activeSplitTabId: id }))
   },
 
