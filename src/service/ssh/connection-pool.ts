@@ -1,44 +1,56 @@
 // src/service/ssh/connection-pool.ts
 import { Client, ConnectConfig } from 'ssh2'
 import { MachineConfig } from '../types'
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync, appendFileSync } from 'fs'
 import { homedir } from 'os'
+import { join } from 'path'
+import { createHash } from 'crypto'
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 interface PoolEntry {
   client: Client
   status: ConnectionStatus
+  approveResolve?: (approved: boolean) => void
 }
 
 export type StatusCallback = (machineId: string, status: ConnectionStatus, message?: string) => void
+export type HostKeyCallback = (machineId: string, host: string, fingerprint: string) => void
+
+const KNOWN_HOSTS = join(homedir(), '.hellowork', 'known_hosts')
+
+function getFingerprint(key: Buffer): string {
+  return createHash('sha256').update(key).digest('base64')
+}
+
+function isKnownHost(host: string, fingerprint: string): boolean {
+  if (!existsSync(KNOWN_HOSTS)) return false
+  const lines = readFileSync(KNOWN_HOSTS, 'utf-8').split('\n')
+  return lines.some(line => line === `${host} ${fingerprint}`)
+}
+
+function saveKnownHost(host: string, fingerprint: string): void {
+  const { mkdirSync } = require('fs')
+  mkdirSync(join(homedir(), '.hellowork'), { recursive: true })
+  appendFileSync(KNOWN_HOSTS, `${host} ${fingerprint}\n`)
+}
 
 export class ConnectionPool {
   private pool = new Map<string, PoolEntry>()
 
-  connect(machine: MachineConfig, onStatus: StatusCallback): void {
+  connect(
+    machine: MachineConfig,
+    onStatus: StatusCallback,
+    password?: string,
+    onHostKey?: HostKeyCallback
+  ): void {
     const existing = this.pool.get(machine.id)
     if (existing && (existing.status === 'connected' || existing.status === 'connecting')) return
 
     const client = new Client()
-    this.pool.set(machine.id, { client, status: 'connecting' })
+    const entry: PoolEntry = { client, status: 'connecting' }
+    this.pool.set(machine.id, entry)
     onStatus(machine.id, 'connecting')
-
-    client
-      .on('ready', () => {
-        const entry = this.pool.get(machine.id)
-        if (entry) entry.status = 'connected'
-        onStatus(machine.id, 'connected')
-      })
-      .on('error', (err) => {
-        const entry = this.pool.get(machine.id)
-        if (entry) entry.status = 'error'
-        onStatus(machine.id, 'error', err.message)
-      })
-      .on('close', () => {
-        this.pool.delete(machine.id)
-        onStatus(machine.id, 'disconnected')
-      })
 
     const config: ConnectConfig = {
       host: machine.host,
@@ -49,18 +61,77 @@ export class ConnectionPool {
       keepaliveCountMax: 2,
     }
 
+    // 认证
     if (machine.auth.type === 'key' && machine.auth.keyPath) {
       const keyPath = machine.auth.keyPath.replace('~', homedir())
       try {
         config.privateKey = readFileSync(keyPath)
       } catch {
-        onStatus(machine.id, 'error', `Cannot read key file: ${keyPath}`)
+        onStatus(machine.id, 'error', `Cannot read key: ${keyPath}`)
         this.pool.delete(machine.id)
         return
       }
+    } else if (machine.auth.type === 'password' && password) {
+      config.password = password
     }
 
+    // Host Key 验证
+    config.hostVerifier = (keyOrHash: Buffer | string, callback: (valid: boolean) => void) => {
+      const keyBuf = Buffer.isBuffer(keyOrHash) ? keyOrHash : Buffer.from(keyOrHash as string, 'hex')
+      const fingerprint = getFingerprint(keyBuf)
+
+      if (isKnownHost(machine.host, fingerprint)) {
+        callback(true)
+        return
+      }
+
+      // 未知主机：挂起等待用户确认
+      entry.approveResolve = (approved: boolean) => {
+        if (approved) saveKnownHost(machine.host, fingerprint)
+        callback(approved)
+      }
+
+      if (onHostKey) {
+        onHostKey(machine.id, machine.host, fingerprint)
+      } else {
+        // 无回调则自动拒绝（安全默认）
+        callback(false)
+      }
+    }
+
+    client
+      .on('ready', () => {
+        const e = this.pool.get(machine.id)
+        if (e) e.status = 'connected'
+        onStatus(machine.id, 'connected')
+      })
+      .on('error', (err) => {
+        const e = this.pool.get(machine.id)
+        if (e) e.status = 'error'
+        onStatus(machine.id, 'error', err.message)
+      })
+      .on('close', () => {
+        this.pool.delete(machine.id)
+        onStatus(machine.id, 'disconnected')
+      })
+
     client.connect(config)
+  }
+
+  approveHostKey(machineId: string): void {
+    const entry = this.pool.get(machineId)
+    if (entry?.approveResolve) {
+      entry.approveResolve(true)
+      entry.approveResolve = undefined
+    }
+  }
+
+  rejectHostKey(machineId: string): void {
+    const entry = this.pool.get(machineId)
+    if (entry?.approveResolve) {
+      entry.approveResolve(false)
+      entry.approveResolve = undefined
+    }
   }
 
   disconnect(machineId: string): void {
@@ -80,8 +151,6 @@ export class ConnectionPool {
   }
 
   disconnectAll(): void {
-    for (const [id] of this.pool) {
-      this.disconnect(id)
-    }
+    for (const [id] of this.pool) this.disconnect(id)
   }
 }
