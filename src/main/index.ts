@@ -2,6 +2,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { ServiceManager } from './service-manager'
+import keytar from 'keytar'
 
 const serviceManager = new ServiceManager()
 let servicePort: number | null = null
@@ -34,6 +35,18 @@ app.whenReady().then(async () => {
 })
 
 ipcMain.handle('service:getPort', () => servicePort)
+
+const KEYCHAIN_SERVICE = 'hellowork'
+
+ipcMain.handle('keychain:set', (_e, account: string, password: string) =>
+  keytar.setPassword(KEYCHAIN_SERVICE, account, password)
+)
+ipcMain.handle('keychain:get', (_e, account: string) =>
+  keytar.getPassword(KEYCHAIN_SERVICE, account)
+)
+ipcMain.handle('keychain:delete', (_e, account: string) =>
+  keytar.deletePassword(KEYCHAIN_SERVICE, account)
+)
 
 app.on('before-quit', () => {
   serviceManager.stop()
