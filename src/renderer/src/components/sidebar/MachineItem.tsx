@@ -19,7 +19,7 @@ const statusLabels: Record<ConnectionStatus, string> = {
 
 export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props) {
   const { statuses, connectMachine, disconnectMachine, deleteMachine } = useMachinesStore()
-  const { addTab } = useWorkspaceStore()
+  const { addTab, addSplitTab, splitMode } = useWorkspaceStore()
   const status = statuses[machine.id] ?? 'disconnected'
   const [showMenu, setShowMenu] = useState(false)
 
@@ -79,6 +79,13 @@ export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props)
               onClick={handleOpenTerminal}
               style={{ background: 'none', border: 'none', color: '#4ec9b0', cursor: 'pointer', fontSize: 13, padding: '2px 4px' }}
             >⊞</button>
+            {splitMode !== 'none' && (
+              <button
+                title="在分屏中打开"
+                onClick={() => addSplitTab(machine.id, machine.name)}
+                style={{ background: 'none', border: 'none', color: '#9cdcfe', cursor: 'pointer', fontSize: 13, padding: '2px 4px' }}
+              >⊟</button>
+            )}
             <button
               title="断开"
               onClick={() => disconnectMachine(machine.id)}
@@ -104,7 +111,13 @@ export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props)
         >
           {[
             { label: '编辑', action: () => { onEdit(machine); setShowMenu(false) } },
-            { label: '删除', action: () => { deleteMachine(machine.id); setShowMenu(false) } },
+            { label: '删除', action: async () => {
+            if (machine.auth.type === 'password' && machine.auth.keychainKey) {
+              await window.electronAPI.keychain.delete(machine.auth.keychainKey).catch(() => {})
+            }
+            deleteMachine(machine.id)
+            setShowMenu(false)
+          } },
           ].map(item => (
             <div
               key={item.label}

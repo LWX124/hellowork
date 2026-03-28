@@ -1,17 +1,18 @@
 // src/service/ssh/session.ts
-import { Client } from 'ssh2'
+import { Client, ClientChannel } from 'ssh2'
 import { randomUUID } from 'crypto'
 
 type DataCallback = (sessionId: string, data: string) => void
 
 interface SessionEntry {
-  stream: any
+  stream: ClientChannel
+  machineId: string
 }
 
 export class SessionManager {
   private sessions = new Map<string, SessionEntry>()
 
-  create(client: Client, onData: DataCallback): Promise<string> {
+  create(client: Client, machineId: string, onData: DataCallback): Promise<string> {
     return new Promise((resolve, reject) => {
       const sessionId = `sess-${randomUUID()}`
       client.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (err, stream) => {
@@ -33,13 +34,18 @@ export class SessionManager {
           if (!flushTimer) flushTimer = setTimeout(flush, 16)
         })
 
+        stream.stderr.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString('utf-8')
+          if (!flushTimer) flushTimer = setTimeout(flush, 16)
+        })
+
         stream.on('close', () => {
           if (flushTimer) clearTimeout(flushTimer)
           flush()
           this.sessions.delete(sessionId)
         })
 
-        this.sessions.set(sessionId, { stream })
+        this.sessions.set(sessionId, { stream, machineId })
         resolve(sessionId)
       })
     })
@@ -66,5 +72,11 @@ export class SessionManager {
 
   closeAll(): void {
     for (const [id] of this.sessions) this.close(id)
+  }
+
+  closeForMachine(machineId: string): void {
+    for (const [id, entry] of this.sessions) {
+      if (entry.machineId === machineId) this.close(id)
+    }
   }
 }

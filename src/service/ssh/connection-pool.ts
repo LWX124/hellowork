@@ -21,7 +21,7 @@ export type HostKeyCallback = (machineId: string, host: string, fingerprint: str
 const KNOWN_HOSTS = join(homedir(), '.hellowork', 'known_hosts')
 
 function getFingerprint(key: Buffer): string {
-  return createHash('sha256').update(key).digest('base64')
+  return 'SHA256:' + createHash('sha256').update(key).digest('base64')
 }
 
 function isKnownHost(host: string, fingerprint: string): boolean {

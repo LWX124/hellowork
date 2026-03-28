@@ -36,7 +36,7 @@ wss.on('connection', (ws) => {
       case 'session:create': {
         const machine = store.getById(msg.machineId)
         if (!machine) {
-          send(ws, { type: 'session:error', sessionId: '', message: 'Machine not found' })
+          send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: 'Machine not found' })
           return
         }
         if (pool.getStatus(msg.machineId) !== 'connected') {
@@ -51,16 +51,16 @@ wss.on('connection', (ws) => {
         }
         const client = pool.getClient(msg.machineId)
         if (!client) {
-          send(ws, { type: 'session:error', sessionId: '', message: 'Connection failed' })
+          send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: 'Connection failed' })
           return
         }
         try {
-          const sessionId = await sessions.create(client, (sid, data) => {
+          const sessionId = await sessions.create(client, msg.machineId, (sid, data) => {
             send(ws, { type: 'terminal:output', sessionId: sid, data })
           })
           send(ws, { type: 'session:created', sessionId, requestId: msg.requestId })
         } catch (err: any) {
-          send(ws, { type: 'session:error', sessionId: '', message: err.message })
+          send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: err.message })
         }
         break
       }
@@ -107,6 +107,7 @@ wss.on('connection', (ws) => {
 
       case 'machine:delete':
         store.delete(msg.id)
+        sessions.closeForMachine(msg.id)
         pool.disconnect(msg.id)
         send(ws, { type: 'machine:deleted', id: msg.id })
         break
@@ -121,7 +122,7 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'connection:status', machineId: msg.machineId, status: pool.getStatus(msg.machineId) as any })
           return
         }
-        ;(pool.connect as any)(machine, (machineId: string, status: any, message?: string) => {
+        pool.connect(machine, (machineId: string, status: any, message?: string) => {
           send(ws, { type: 'connection:status', machineId, status, message })
         }, msg.password,
         (machineId: string, host: string, fingerprint: string) => {
@@ -135,11 +136,11 @@ wss.on('connection', (ws) => {
         break
 
       case 'hostkey:approve':
-        ;(pool as any).approveHostKey(msg.machineId)
+        pool.approveHostKey(msg.machineId)
         break
 
       case 'hostkey:reject':
-        ;(pool as any).rejectHostKey(msg.machineId)
+        pool.rejectHostKey(msg.machineId)
         break
     }
   })

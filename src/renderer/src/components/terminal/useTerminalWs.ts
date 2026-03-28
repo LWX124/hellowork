@@ -25,7 +25,7 @@ export function useTerminalWs(machineId: string, tabId: string) {
         setSessionId(msg.sessionId)
         setTabSessionId(tabId, msg.sessionId)
       }
-      if (msg.type === 'session:error') {
+      if (msg.type === 'session:error' && msg.requestId === requestId) {
         setError(msg.message)
       }
     })

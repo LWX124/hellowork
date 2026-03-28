@@ -27,6 +27,7 @@ export function TerminalPane({ tabId, machineId, isActive }: Props) {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 10000,
     })
     const webgl = new WebglAddon()
     const fit = new FitAddon()

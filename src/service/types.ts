@@ -19,7 +19,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: 'session:created'; sessionId: string; requestId: string }
-  | { type: 'session:error'; sessionId: string; message: string }
+  | { type: 'session:error'; sessionId: string; requestId: string; message: string }
   | { type: 'terminal:output'; sessionId: string; data: string }
   | { type: 'tunnel:opened'; tunnelId: string; localPort: number }
   | { type: 'tunnel:error'; tunnelId: string; message: string }
