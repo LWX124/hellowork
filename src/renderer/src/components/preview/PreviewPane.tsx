@@ -6,8 +6,7 @@ import { toast } from '../common/Toast'
 
 export function PreviewPane() {
   const [portInput, setPortInput] = useState('')
-  const [tunnelId, setTunnelId] = useState<string | null>(null)
-  const [localPort, setLocalPort] = useState<number | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const { send, onMessage } = useServiceStore()
@@ -15,12 +14,16 @@ export function PreviewPane() {
 
   useEffect(() => {
     const unsub = onMessage((msg) => {
-      if (msg.type === 'tunnel:opened') {
-        setTunnelId(msg.tunnelId)
-        setLocalPort(msg.localPort)
+      if (msg.type === 'preview:probe:result') {
+        if (msg.url) {
+          setPreviewUrl(msg.url)
+        } else {
+          toast.error('无法访问预览地址')
+        }
       }
       if (msg.type === 'tunnel:error') {
         toast.error(`端口转发失败：${msg.message}`)
+        setPreviewUrl(null)
       }
     })
     return unsub
@@ -36,14 +39,11 @@ export function PreviewPane() {
       toast.error('请选择机器')
       return
     }
-    if (tunnelId) send({ type: 'tunnel:close', tunnelId })
-    send({ type: 'tunnel:open', machineId: activeMachineId, remotePort: port })
+    send({ type: 'preview:probe', machineId: activeMachineId, remotePort: port })
   }
 
   const handleClose = () => {
-    if (tunnelId) send({ type: 'tunnel:close', tunnelId })
-    setTunnelId(null)
-    setLocalPort(null)
+    setPreviewUrl(null)
   }
 
   const handleOpenDevTools = () => {
@@ -91,7 +91,7 @@ export function PreviewPane() {
           placeholder="3000"
         />
         <button style={btnStyle} onClick={handleOpen}>预览</button>
-        {localPort && (
+        {previewUrl && (
           <>
             <button
               style={{ ...btnStyle, background: 'none', border: '1px solid #3e3e3e', color: '#ccc' }}
@@ -110,10 +110,10 @@ export function PreviewPane() {
       </div>
 
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        {localPort ? (
+        {previewUrl ? (
           <webview
             ref={webviewRef as any}
-            src={`http://localhost:${localPort}`}
+            src={previewUrl}
             style={{ width: '100%', height: '100%' }}
           />
         ) : (

@@ -17,6 +17,7 @@ interface MachinesState {
   transports: Record<string, 'ssh' | 'mosh' | 'ttyd'>
   pendingHostKey: { machineId: string; host: string; fingerprint: string } | null
   pendingPassword: { machineId: string; machineName: string } | null
+  moshUnavailable: boolean
   init: () => (() => void)
   saveMachine: (machine: MachineConfig) => void
   deleteMachine: (id: string) => void
@@ -26,6 +27,7 @@ interface MachinesState {
   rejectHostKey: () => void
   submitPassword: (password: string) => Promise<void>
   cancelPassword: () => void
+  dismissMoshHint: () => void
 }
 
 export const useMachinesStore = create<MachinesState>((set, get) => ({
@@ -35,6 +37,7 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
   transports: {},
   pendingHostKey: null,
   pendingPassword: null,
+  moshUnavailable: false,
 
   init: () => {
     const { send, onMessage } = useServiceStore.getState()
@@ -128,6 +131,9 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
         case 'hostkey:verify':
           set({ pendingHostKey: { machineId: msg.machineId, host: msg.host, fingerprint: msg.fingerprint } })
           break
+        case 'mosh:unavailable':
+          set({ moshUnavailable: true })
+          break
       }
     })
 
@@ -187,4 +193,6 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
       statuses: { ...get().statuses, [pendingHostKey.machineId]: 'disconnected' },
     })
   },
+
+  dismissMoshHint: () => set({ moshUnavailable: false }),
 }))
