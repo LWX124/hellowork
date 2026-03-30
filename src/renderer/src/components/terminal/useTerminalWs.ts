@@ -10,6 +10,7 @@ export function useTerminalWs(machineId: string, tabId: string) {
   const setTabSessionId = useWorkspaceStore(s => s.setTabSessionId)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [disconnected, setDisconnected] = useState(false)
   const sessionIdRef = useRef<string | null>(null)
   const requestIdRef = useRef<string>(crypto.randomUUID())
 
@@ -27,6 +28,19 @@ export function useTerminalWs(machineId: string, tabId: string) {
       }
       if (msg.type === 'session:error' && msg.requestId === requestId) {
         setError(msg.message)
+      }
+      if (msg.type === 'connection:status' && msg.machineId === machineId) {
+        if (msg.status === 'reconnecting') {
+          // do NOT set disconnected = true
+          // yellow message is written by ConnectionManager via terminal:output
+        } else if (msg.status === 'disconnected' || msg.status === 'error' || msg.status === 'failed') {
+          setDisconnected(true)
+        }
+      }
+      if (msg.type === 'session:replaced' && msg.machineId === machineId) {
+        sessionIdRef.current = msg.newSessionId
+        setSessionId(msg.newSessionId)
+        setTabSessionId(tabId, msg.newSessionId)
       }
     })
 
@@ -48,5 +62,5 @@ export function useTerminalWs(machineId: string, tabId: string) {
     if (sessionIdRef.current) send({ type: 'terminal:resize', sessionId: sessionIdRef.current, cols, rows })
   }
 
-  return { sessionId, error, writeInput, resize }
+  return { sessionId, error, disconnected, writeInput, resize }
 }
