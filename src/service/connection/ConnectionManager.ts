@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { ITransport, IShell } from './ITransport'
 import { SshTransport } from './SshTransport'
+import { MoshTransport } from './MoshTransport'
 import { MachineConfig } from '../types'
 
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed'
@@ -22,7 +23,7 @@ export class ConnectionManager extends EventEmitter {
 
   constructor(protected machine: MachineConfig) {
     super()
-    this.transports = [new SshTransport()]
+    this.transports = [new SshTransport(), new MoshTransport()]
   }
 
   private setState(state: ConnectionState, transport?: 'ssh' | 'mosh' | 'ttyd'): void {
