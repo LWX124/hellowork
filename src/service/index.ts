@@ -74,6 +74,20 @@ wss.on('connection', (ws) => {
       manager.on('mosh:unavailable', () => {
         send(ws, { type: 'mosh:unavailable' })
       })
+
+      manager.on('tunnel:reconnected', async ({ machineId, client }: { machineId: string; client: import('ssh2').Client }) => {
+        // Re-establish all open tunnels for this machine
+        const openTunnels = tunnels.getAll().filter(t => t.machineId === machineId)
+        for (const t of openTunnels) {
+          try {
+            tunnels.close(t.tunnelId)
+            const { tunnelId, localPort } = await tunnels.open(client, machineId, t.remotePort)
+            send(ws, { type: 'tunnel:opened', tunnelId, localPort })
+          } catch {
+            send(ws, { type: 'tunnel:error', tunnelId: t.tunnelId, message: 'Tunnel re-establishment failed' })
+          }
+        }
+      })
     }
 
     return manager
@@ -214,6 +228,36 @@ wss.on('connection', (ws) => {
       case 'hostkey:approve':
       case 'hostkey:reject':
         break
+
+      case 'preview:probe': {
+        const machine = store.getById(msg.machineId)
+        if (!machine) {
+          send(ws, { type: 'preview:probe:result', url: '', via: 'tunnel' })
+          return
+        }
+        try {
+          const controller = new AbortController()
+          setTimeout(() => controller.abort(), 3000)
+          await fetch(`http://${machine.host}:${msg.remotePort}/`, { signal: controller.signal })
+          // Any response means server is reachable
+          send(ws, { type: 'preview:probe:result', url: `http://${machine.host}:${msg.remotePort}`, via: 'direct' })
+        } catch {
+          // Fallback: open SSH tunnel
+          const manager = managers.get(msg.machineId)
+          const client = manager?.getActiveSshClient()
+          if (!client) {
+            send(ws, { type: 'preview:probe:result', url: '', via: 'tunnel' })
+            return
+          }
+          try {
+            const { tunnelId, localPort } = await tunnels.open(client, msg.machineId, msg.remotePort)
+            send(ws, { type: 'preview:probe:result', url: `http://localhost:${localPort}`, via: 'tunnel' })
+          } catch (err: any) {
+            send(ws, { type: 'tunnel:error', tunnelId: '', message: err.message })
+          }
+        }
+        break
+      }
     }
   })
 })

@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { ITransport, IShell } from './ITransport'
 import { SshTransport } from './SshTransport'
 import { MoshTransport } from './MoshTransport'
+import { TtydTransport } from './TtydTransport'
 import { MachineConfig } from '../types'
 
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed'
@@ -23,7 +24,7 @@ export class ConnectionManager extends EventEmitter {
 
   constructor(protected machine: MachineConfig) {
     super()
-    this.transports = [new SshTransport(), new MoshTransport()]
+    this.transports = [new SshTransport(), new MoshTransport(), new TtydTransport()]
   }
 
   private setState(state: ConnectionState, transport?: 'ssh' | 'mosh' | 'ttyd'): void {
@@ -107,6 +108,10 @@ export class ConnectionManager extends EventEmitter {
             this.setState('connected', transport.name)
             this.emit('session:replaced', { oldSessionId, newSessionId, machineId: this.machine.id })
             this.emit('terminal:message', '\r\n\x1b[32m--- 已恢复 ---\x1b[0m\r\n')
+            if (transport.name === 'ssh') {
+              const sshClient = (this.activeTransport as SshTransport).getClient()
+              if (sshClient) this.emit('tunnel:reconnected', { machineId: this.machine.id, client: sshClient })
+            }
             if (transport.name !== 'ssh') this.startBackgroundSshUpgrade()
             return
           } catch {
@@ -143,6 +148,8 @@ export class ConnectionManager extends EventEmitter {
         this.setState('connected', 'ssh')
         this.emit('session:replaced', { oldSessionId, newSessionId, machineId: this.machine.id })
         this.emit('terminal:message', '\r\n\x1b[33m--- 已切换至 SSH ---\x1b[0m\r\n')
+        const sshClient = sshTransport.getClient()
+        if (sshClient) this.emit('tunnel:reconnected', { machineId: this.machine.id, client: sshClient })
         clearInterval(this.backgroundUpgradeTimer!)
         this.backgroundUpgradeTimer = null
       } catch { /* silent */ }
