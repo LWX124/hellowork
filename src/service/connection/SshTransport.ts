@@ -43,7 +43,7 @@ export class SshTransport extends EventEmitter implements ITransport {
     return true // SSH is always attempted first
   }
 
-  async connect(machine: MachineConfig, _opts: TransportOpts): Promise<void> {
+  async connect(machine: MachineConfig, opts: TransportOpts): Promise<void> {
     return new Promise((resolve, reject) => {
       const client = new Client()
       this.client = client
@@ -65,9 +65,11 @@ export class SshTransport extends EventEmitter implements ITransport {
         } catch {
           return reject(new Error(`Cannot read key: ${keyPath}`))
         }
+        if (opts.passphrase) config.passphrase = opts.passphrase
         const agentSock = getSshAuthSock()
         if (agentSock) config.agent = agentSock
       } else {
+        if (opts.password) config.password = opts.password
         const agentSock = getSshAuthSock()
         if (agentSock) config.agent = agentSock
       }
@@ -87,7 +89,16 @@ export class SshTransport extends EventEmitter implements ITransport {
       }
 
       client
-        .on('ready', () => resolve())
+        .on('ready', () => {
+          // Attach 'close' listener only after successful connection to avoid
+          // spurious transport:disconnected events on failed connect attempts
+          client.once('close', () => {
+            this.client = null
+            this.stream = null
+            this.emit('transport:disconnected')
+          })
+          resolve()
+        })
         .on('error', (err) => {
           this.client = null
           reject(err)
@@ -95,7 +106,6 @@ export class SshTransport extends EventEmitter implements ITransport {
         .on('close', () => {
           this.client = null
           this.stream = null
-          this.emit('transport:disconnected')
         })
 
       client.connect(config)

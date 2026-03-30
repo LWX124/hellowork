@@ -33,7 +33,7 @@ export type ServerMessage =
   | { type: 'hostkey:verify'; machineId: string; host: string; fingerprint: string }
   | { type: 'session:replaced'; oldSessionId: string; newSessionId: string; machineId: string }
   | { type: 'mosh:unavailable' }
-  | { type: 'preview:probe:result'; url: string | null; via: 'direct' | 'tunnel' }
+  | { type: 'preview:probe:result'; url: string | null; via: 'direct' | 'tunnel'; tunnelId?: string }
 
 export interface MachineConfig {
   id: string

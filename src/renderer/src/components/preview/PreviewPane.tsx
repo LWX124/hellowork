@@ -9,6 +9,7 @@ export function PreviewPane() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [probeError, setProbeError] = useState(false)
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null)
+  const [tunnelId, setTunnelId] = useState<string | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const { send, onMessage } = useServiceStore()
   const machines = useMachinesStore(s => s.machines)
@@ -19,15 +20,18 @@ export function PreviewPane() {
         if (msg.url) {
           setPreviewUrl(msg.url)
           setProbeError(false)
+          setTunnelId(msg.via === 'tunnel' && msg.tunnelId ? msg.tunnelId : null)
         } else {
           setProbeError(true)
           setPreviewUrl(null)
+          setTunnelId(null)
         }
       }
       if (msg.type === 'tunnel:error') {
         toast.error(`端口转发失败：${msg.message}`)
         setProbeError(true)
         setPreviewUrl(null)
+        setTunnelId(null)
       }
     })
     return unsub
@@ -48,7 +52,11 @@ export function PreviewPane() {
   }
 
   const handleClose = () => {
+    if (tunnelId) {
+      send({ type: 'tunnel:close', tunnelId })
+    }
     setPreviewUrl(null)
+    setTunnelId(null)
   }
 
   const handleOpenDevTools = () => {

@@ -55,6 +55,8 @@ export class MoshTransport extends EventEmitter implements ITransport {
       // Mosh outputs to stdout when connected
       this.process!.stdout!.once('data', () => {
         clearTimeout(timeout)
+        // TODO: This connect heuristic (first stdout data) is imprecise —
+        // mosh's UDP session may not be established yet at this point.
         resolve()
       })
 

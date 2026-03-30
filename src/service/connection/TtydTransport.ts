@@ -13,9 +13,9 @@ export class TtydTransport extends EventEmitter implements ITransport {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 3000)
-      await fetch(`http://${machine.host}:${TTYD_PORT}/`, { signal: controller.signal })
+      const res = await fetch(`http://${machine.host}:${TTYD_PORT}/`, { signal: controller.signal })
       clearTimeout(timeout)
-      return true // any response (including 4xx/5xx) means server is reachable
+      return res.status >= 200 && res.status < 300
     } catch {
       return false
     }

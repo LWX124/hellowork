@@ -48,18 +48,18 @@ wss.on('connection', (ws) => {
         })
       })
 
-      manager.on('session:replaced', (msg: { oldSessionId: string; newSessionId: string; machineId: string }) => {
-        // Move the shell from old session to new session
-        const shell = shellMap.get(msg.oldSessionId)
-        if (shell) {
-          shellMap.delete(msg.oldSessionId)
-          shellMap.set(msg.newSessionId, shell)
-        }
-        // Move the machine mapping too
-        if (sessionMachineMap.has(msg.oldSessionId)) {
-          sessionMachineMap.delete(msg.oldSessionId)
+      manager.on('session:replaced', async (msg: { oldSessionId: string; newSessionId: string; machineId: string }) => {
+        // Remove the old (dead) shell — the transport disconnected so it's unusable
+        shellMap.delete(msg.oldSessionId)
+        sessionMachineMap.delete(msg.oldSessionId)
+        // Create a fresh shell on the new transport connection
+        try {
+          const newShell = await manager.createShell((data) => {
+            send(ws, { type: 'terminal:output', sessionId: msg.newSessionId, data })
+          }, msg.newSessionId)
+          shellMap.set(msg.newSessionId, newShell)
           sessionMachineMap.set(msg.newSessionId, msg.machineId)
-        }
+        } catch { /* shell creation failed; client will see session:replaced and can retry */ }
         send(ws, { type: 'session:replaced', ...msg })
       })
 
@@ -210,7 +210,8 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'connection:status', machineId: msg.machineId, status: manager.getState() as any })
           return
         }
-        manager.connect().catch(() => {})
+        const { password, passphrase } = msg
+        manager.connect({ password, passphrase }).catch(() => {})
         break
       }
 
@@ -251,7 +252,7 @@ wss.on('connection', (ws) => {
           }
           try {
             const { tunnelId, localPort } = await tunnels.open(client, msg.machineId, msg.remotePort)
-            send(ws, { type: 'preview:probe:result', url: `http://localhost:${localPort}`, via: 'tunnel' })
+            send(ws, { type: 'preview:probe:result', url: `http://localhost:${localPort}`, via: 'tunnel', tunnelId })
           } catch (err: any) {
             send(ws, { type: 'preview:probe:result', url: null, via: 'tunnel' })
           }

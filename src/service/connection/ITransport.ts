@@ -4,6 +4,8 @@ import { MachineConfig } from '../types'
 export interface TransportOpts {
   cols?: number
   rows?: number
+  password?: string
+  passphrase?: string
 }
 
 export interface IShell {

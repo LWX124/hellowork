@@ -33,13 +33,13 @@ export class ConnectionManager extends EventEmitter {
     this.emit('status', { status: state, ...(state === 'connected' ? { transport } : {}) })
   }
 
-  async connect(): Promise<void> {
+  async connect(connectOpts?: { password?: string; passphrase?: string }): Promise<void> {
     this.stopped = false
     this.setState('connecting')
-    await this.tryTransports()
+    await this.tryTransports(connectOpts)
   }
 
-  private async tryTransports(): Promise<void> {
+  private async tryTransports(connectOpts?: { password?: string; passphrase?: string }): Promise<void> {
     for (const transport of this.transports) {
       const available = await transport.isAvailable(this.machine)
       if (!available) {
@@ -48,7 +48,7 @@ export class ConnectionManager extends EventEmitter {
       }
       for (let attempt = 0; attempt < MAX_FAILURES_PER_TRANSPORT; attempt++) {
         try {
-          await transport.connect(this.machine, this.lastDimensions)
+          await transport.connect(this.machine, { ...this.lastDimensions, ...connectOpts })
           this.activeTransport = transport
           ;(transport as EventEmitter).once('transport:disconnected', () => this.onDisconnected())
           this.setState('connected', transport.name)
@@ -114,12 +114,11 @@ export class ConnectionManager extends EventEmitter {
             }
             if (transport.name !== 'ssh') this.startBackgroundSshUpgrade()
             return
-          } catch {
-            await this.backoff(this.reconnectAttempts++)
-          }
+          } catch { /* try next attempt */ }
         }
       }
-      await this.backoff(this.reconnectAttempts++)
+      await this.backoff(this.reconnectAttempts)
+      this.reconnectAttempts++
       if (this.reconnectAttempts > 10) {
         this.setState('failed')
         return
