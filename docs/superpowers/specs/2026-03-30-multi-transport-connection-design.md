@@ -100,7 +100,7 @@ Connects to a ttyd WebSocket server running on the remote machine.
 ```
 1. SshTransport
 2. MoshTransport  (skip if mosh not installed locally)
-3. TtydTransport  (auto-start ttyd on remote via SSH if SSH partially works)
+3. TtydTransport  (auto-start ttyd via short-lived SSH if SSH can connect; skip auto-start if SSH unavailable)
 ```
 
 Retry logic per transport:
@@ -197,7 +197,9 @@ New message types added to `types.ts`:
 { type: 'preview:probe:result'; url: string; via: 'direct' | 'tunnel' }
 ```
 
-Open tunnels during reconnect: when `ConnectionManager` reconnects, it emits a `tunnel:reconnected` event internally. `TunnelManager` re-establishes any tunnels that were open on the previous SSH client using the new client. If re-establishment fails, the tunnel is closed and `tunnel:error` is emitted to the renderer so `PreviewPane` can show an error and prompt the user to re-open.
+Open tunnels during reconnect: when `ConnectionManager` reconnects, it emits a `tunnel:reconnected` internal EventEmitter event (NOT an IPC message — do not add to `types.ts`). `TunnelManager` re-establishes any tunnels that were open on the previous SSH client using the new client. If re-establishment fails, the tunnel is closed and `tunnel:error` is emitted to the renderer so `PreviewPane` can show an error and prompt the user to re-open.
+
+`transport` field in `connection:status`: only set when `status === 'connected'`. Omit during `reconnecting`, `connecting`, `disconnected`, `failed`.
 
 ---
 
