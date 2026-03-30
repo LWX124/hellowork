@@ -5,6 +5,16 @@ import { readFileSync, existsSync, appendFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createHash } from 'crypto'
+import { execSync } from 'child_process'
+
+function getSshAuthSock(): string | undefined {
+  if (process.env.SSH_AUTH_SOCK) return process.env.SSH_AUTH_SOCK
+  try {
+    const sock = execSync('launchctl getenv SSH_AUTH_SOCK', { timeout: 1000 }).toString().trim()
+    if (sock) return sock
+  } catch {}
+  return undefined
+}
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -43,6 +53,7 @@ export class ConnectionPool {
     machine: MachineConfig,
     onStatus: StatusCallback,
     password?: string,
+    passphrase?: string,
     onHostKey?: HostKeyCallback
   ): void {
     const existing = this.pool.get(machine.id)
@@ -57,9 +68,10 @@ export class ConnectionPool {
       host: machine.host,
       port: machine.port,
       username: machine.username,
-      readyTimeout: 15000,
-      keepaliveInterval: 30000,
-      keepaliveCountMax: 2,
+      readyTimeout: 30000,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 5,
+      debug: (msg: string) => process.stderr.write(`[ssh2] ${msg}\n`),
     }
 
     // 认证
@@ -67,13 +79,27 @@ export class ConnectionPool {
       const keyPath = machine.auth.keyPath.replace('~', homedir())
       try {
         config.privateKey = readFileSync(keyPath)
+        if (passphrase) config.passphrase = passphrase
       } catch {
         onStatus(machine.id, 'error', `Cannot read key: ${keyPath}`)
         this.pool.delete(machine.id)
         return
       }
-    } else if (machine.auth.type === 'password' && password) {
+      const agentSock = getSshAuthSock()
+      process.stderr.write(`[pool] SSH_AUTH_SOCK=${agentSock ?? 'none'}\n`)
+      if (agentSock) config.agent = agentSock
+    }
+    // password overrides / supplements key auth (used when key auth fails)
+    if (password) {
       config.password = password
+    } else if (machine.auth.type === 'password' && machine.auth.keychainKey) {
+      // password-only machine but no password provided — will fail
+    }
+    if (!config.privateKey && !config.password) {
+      // No key path configured, try ssh-agent only
+      const agentSock = getSshAuthSock()
+      process.stderr.write(`[pool] SSH_AUTH_SOCK=${agentSock ?? 'none'}\n`)
+      if (agentSock) config.agent = agentSock
     }
 
     // Host Key 验证
@@ -104,18 +130,24 @@ export class ConnectionPool {
       .on('ready', () => {
         const e = this.pool.get(machine.id)
         if (e) e.status = 'connected'
+        process.stderr.write(`[pool] ${machine.id} ready\n`)
         onStatus(machine.id, 'connected')
       })
       .on('error', (err) => {
         const e = this.pool.get(machine.id)
+        process.stderr.write(`[pool] ${machine.id} error: ${err.message} (entry exists: ${!!e})\n`)
         if (!e) return   // already cleaned up (e.g., by rejectHostKey)
         e.status = 'error'
         onStatus(machine.id, 'error', err.message)
       })
       .on('close', () => {
-        if (!this.pool.has(machine.id)) return  // already cleaned up
+        const e = this.pool.get(machine.id)
+        process.stderr.write(`[pool] ${machine.id} close (entry status: ${e?.status ?? 'none'})\n`)
+        if (!e) return  // already cleaned up
         this.pool.delete(machine.id)
-        onStatus(machine.id, 'disconnected')
+        if (e.status !== 'error') {
+          onStatus(machine.id, 'disconnected')
+        }
       })
 
     client.connect(config)

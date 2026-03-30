@@ -11,11 +11,12 @@ export type ClientMessage =
   | { type: 'machine:list' }
   | { type: 'machine:save'; machine: MachineConfig }
   | { type: 'machine:delete'; id: string }
-  | { type: 'machine:connect'; machineId: string; password?: string }
+  | { type: 'machine:connect'; machineId: string; password?: string; passphrase?: string }
   | { type: 'machine:disconnect'; machineId: string }
   // 主机指纹确认
   | { type: 'hostkey:approve'; machineId: string }
   | { type: 'hostkey:reject'; machineId: string }
+  | { type: 'preview:probe'; machineId: string; remotePort: number }
 
 export type ServerMessage =
   | { type: 'session:created'; sessionId: string; requestId: string }
@@ -23,13 +24,16 @@ export type ServerMessage =
   | { type: 'terminal:output'; sessionId: string; data: string }
   | { type: 'tunnel:opened'; tunnelId: string; localPort: number }
   | { type: 'tunnel:error'; tunnelId: string; message: string }
-  | { type: 'connection:status'; machineId: string; status: 'connected' | 'disconnected' | 'connecting' | 'error'; message?: string }
+  | { type: 'connection:status'; machineId: string; status: 'connected' | 'disconnected' | 'connecting' | 'error' | 'reconnecting' | 'failed'; message?: string; transport?: 'ssh' | 'mosh' | 'ttyd' }
   // 机器管理
   | { type: 'machine:list:result'; machines: MachineConfig[] }
   | { type: 'machine:saved'; machine: MachineConfig }
   | { type: 'machine:deleted'; id: string }
   // 主机指纹验证
   | { type: 'hostkey:verify'; machineId: string; host: string; fingerprint: string }
+  | { type: 'session:replaced'; oldSessionId: string; newSessionId: string; machineId: string }
+  | { type: 'mosh:unavailable' }
+  | { type: 'preview:probe:result'; url: string; via: 'direct' | 'tunnel' }
 
 export interface MachineConfig {
   id: string
@@ -39,7 +43,8 @@ export interface MachineConfig {
   username: string
   auth: {
     type: 'password' | 'key'
-    keychainKey?: string
-    keyPath?: string
+    keychainKey?: string       // for password auth
+    keyPath?: string           // for key auth
+    passphraseKeychainKey?: string  // for key auth with passphrase
   }
 }

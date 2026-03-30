@@ -2,26 +2,39 @@
 import { create } from 'zustand'
 import { MachineConfig } from '../../../service/types'
 import { useServiceStore } from './service'
+import { useWorkspaceStore } from './workspace'
+import { toast } from '../components/common/Toast'
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+// Track machines where we already tried the saved Keychain password (avoid infinite retry loop)
+const triedKeychainPassword = new Set<string>()
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting' | 'failed'
 
 interface MachinesState {
   machines: MachineConfig[]
   statuses: Record<string, ConnectionStatus>
+  errorMessages: Record<string, string>
+  transports: Record<string, 'ssh' | 'mosh' | 'ttyd'>
   pendingHostKey: { machineId: string; host: string; fingerprint: string } | null
+  pendingPassword: { machineId: string; machineName: string } | null
   init: () => (() => void)
   saveMachine: (machine: MachineConfig) => void
   deleteMachine: (id: string) => void
-  connectMachine: (machineId: string, password?: string) => void
+  connectMachine: (machineId: string, password?: string, passphrase?: string) => void
   disconnectMachine: (machineId: string) => void
   approveHostKey: () => void
   rejectHostKey: () => void
+  submitPassword: (password: string) => void
+  cancelPassword: () => void
 }
 
 export const useMachinesStore = create<MachinesState>((set, get) => ({
   machines: [],
   statuses: {},
+  errorMessages: {},
+  transports: {},
   pendingHostKey: null,
+  pendingPassword: null,
 
   init: () => {
     const { send, onMessage } = useServiceStore.getState()
@@ -44,9 +57,65 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
         case 'machine:deleted':
           set({ machines: get().machines.filter(m => m.id !== msg.id) })
           break
-        case 'connection:status':
-          set({ statuses: { ...get().statuses, [msg.machineId]: msg.status as ConnectionStatus } })
+        case 'connection:status': {
+          const prev = get().statuses[msg.machineId]
+          const newStatuses = { ...get().statuses, [msg.machineId]: msg.status as ConnectionStatus }
+          const newErrors = { ...get().errorMessages }
+          const newTransports = { ...get().transports }
+
+          if (msg.status === 'reconnecting') {
+            set({ statuses: newStatuses })
+            break
+          }
+
+          if (msg.status === 'failed') {
+            toast.error(`连接失败: ${msg.machineId}`)
+            set({ statuses: newStatuses })
+            break
+          }
+
+          if (msg.status === 'error') {
+            const isAuthFailure = msg.message?.includes('authentication') || msg.message?.includes('All configured')
+            if (isAuthFailure) {
+              const machine = get().machines.find(m => m.id === msg.machineId)
+              if (machine) {
+                const keychainKey = `${msg.machineId}_fallback_password`
+                if (!triedKeychainPassword.has(msg.machineId)) {
+                  window.electronAPI.keychain.get(keychainKey).then((saved) => {
+                    if (saved) {
+                      triedKeychainPassword.add(msg.machineId)
+                      get().connectMachine(msg.machineId, saved)
+                    } else {
+                      set({ statuses: newStatuses, pendingPassword: { machineId: msg.machineId, machineName: machine.name } })
+                    }
+                  })
+                } else {
+                  triedKeychainPassword.delete(msg.machineId)
+                  window.electronAPI.keychain.delete(keychainKey).catch(() => {})
+                  set({ statuses: newStatuses, pendingPassword: { machineId: msg.machineId, machineName: machine.name } })
+                }
+                break
+              }
+            }
+            newErrors[msg.machineId] = msg.message ?? 'Connection failed'
+            toast.error(`连接失败: ${msg.message ?? 'Connection failed'}`)
+          } else {
+            delete newErrors[msg.machineId]
+          }
+
+          if (msg.status === 'connected' && msg.transport) {
+            newTransports[msg.machineId] = msg.transport
+          }
+
+          set({ statuses: newStatuses, errorMessages: newErrors, transports: newTransports })
+
+          if (msg.status === 'connected' && prev !== 'connected') {
+            triedKeychainPassword.delete(msg.machineId)
+            const machine = get().machines.find(m => m.id === msg.machineId)
+            if (machine) useWorkspaceStore.getState().addTab(machine.id, machine.name)
+          }
           break
+        }
         case 'hostkey:verify':
           set({ pendingHostKey: { machineId: msg.machineId, host: msg.host, fingerprint: msg.fingerprint } })
           break
@@ -65,13 +134,32 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
     useServiceStore.getState().send({ type: 'machine:delete', id })
   },
 
-  connectMachine: (machineId, password) => {
+  connectMachine: (machineId, password, passphrase) => {
     set({ statuses: { ...get().statuses, [machineId]: 'connecting' } })
-    useServiceStore.getState().send({ type: 'machine:connect', machineId, password })
+    useServiceStore.getState().send({ type: 'machine:connect', machineId, password, passphrase })
   },
 
   disconnectMachine: (machineId) => {
     useServiceStore.getState().send({ type: 'machine:disconnect', machineId })
+  },
+
+  submitPassword: async (password) => {
+    const { pendingPassword } = get()
+    if (!pendingPassword) return
+    // Save to Keychain for future connections
+    const keychainKey = `${pendingPassword.machineId}_fallback_password`
+    await window.electronAPI.keychain.set(keychainKey, password).catch(() => {})
+    set({ pendingPassword: null })
+    get().connectMachine(pendingPassword.machineId, password)
+  },
+
+  cancelPassword: () => {
+    const { pendingPassword } = get()
+    if (!pendingPassword) return
+    set({
+      pendingPassword: null,
+      statuses: { ...get().statuses, [pendingPassword.machineId]: 'disconnected' },
+    })
   },
 
   approveHostKey: () => {
