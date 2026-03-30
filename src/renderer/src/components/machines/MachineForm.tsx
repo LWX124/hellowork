@@ -36,6 +36,7 @@ export function MachineForm({ machine, onClose }: Props) {
   const [username, setUsername] = useState(machine?.username ?? '')
   const [authType, setAuthType] = useState<'key' | 'password'>(machine?.auth.type ?? 'key')
   const [keyPath, setKeyPath] = useState(machine?.auth.keyPath ?? '~/.ssh/id_rsa')
+  const [passphrase, setPassphrase] = useState('')
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -50,6 +51,10 @@ export function MachineForm({ machine, onClose }: Props) {
     if (authType === 'password' && password) {
       await window.electronAPI.keychain.set(id, password)
     }
+    const passphraseKey = `${id}_passphrase`
+    if (authType === 'key' && passphrase) {
+      await window.electronAPI.keychain.set(passphraseKey, passphrase)
+    }
 
     const config: MachineConfig = {
       id,
@@ -58,7 +63,7 @@ export function MachineForm({ machine, onClose }: Props) {
       port: parseInt(port) || 22,
       username: username.trim(),
       auth: authType === 'key'
-        ? { type: 'key', keyPath: keyPath.trim() }
+        ? { type: 'key', keyPath: keyPath.trim(), passphraseKeychainKey: passphrase ? passphraseKey : machine?.auth.passphraseKeychainKey }
         : { type: 'password', keychainKey: id }
     }
 
@@ -111,10 +116,16 @@ export function MachineForm({ machine, onClose }: Props) {
         </div>
       </div>
       {authType === 'key' ? (
-        <div style={fieldStyle}>
-          <label style={labelStyle}>私钥路径</label>
-          <input style={inputStyle} value={keyPath} onChange={e => setKeyPath(e.target.value)} placeholder="~/.ssh/id_rsa" />
-        </div>
+        <>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>私钥路径</label>
+            <input style={inputStyle} value={keyPath} onChange={e => setKeyPath(e.target.value)} placeholder="~/.ssh/id_rsa" />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>私钥密码短语（可选，将加密存储到 macOS Keychain）</label>
+            <input style={inputStyle} type="password" value={passphrase} onChange={e => setPassphrase(e.target.value)} placeholder="留空表示无密码短语" />
+          </div>
+        </>
       ) : (
         <div style={fieldStyle}>
           <label style={labelStyle}>密码（将加密存储到 macOS Keychain）</label>

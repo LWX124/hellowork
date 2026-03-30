@@ -5,7 +5,7 @@ export interface TerminalTab {
   id: string
   machineId: string
   title: string
-  sessionId?: string   // 由 session:created 响应后填入，用于 session:close
+  sessionId?: string
 }
 
 export type SplitMode = 'none' | 'horizontal' | 'vertical'
@@ -19,8 +19,8 @@ interface WorkspaceState {
   splitRatio: number
   previewVisible: boolean
   previewHeight: number
+  sidebarOpen: boolean
 
-  init: () => void
   addTab: (machineId: string, title: string) => void
   closeTab: (tabId: string) => void
   setActiveTab: (tabId: string) => void
@@ -30,9 +30,10 @@ interface WorkspaceState {
   setActiveSplitTab: (tabId: string) => void
   setSplitMode: (mode: SplitMode) => void
   togglePreview: () => void
+  setSidebarOpen: (open: boolean) => void
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set, _get) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   tabs: [],
   activeTabId: null,
   splitMode: 'none',
@@ -41,23 +42,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set, _get) => ({
   splitRatio: 0.5,
   previewVisible: false,
   previewHeight: 300,
-
-  init: () => {},
+  sidebarOpen: true,
 
   addTab: (machineId, title) => {
-    const id = crypto.randomUUID()
-    const tab: TerminalTab = { id, machineId, title }
-    set(s => ({ tabs: [...s.tabs, tab], activeTabId: id }))
+    set(s => {
+      // If this machine already has a tab, just switch to it
+      const existing = s.tabs.find(t => t.machineId === machineId)
+      if (existing) return { activeTabId: existing.id, sidebarOpen: false }
+      const id = crypto.randomUUID()
+      return {
+        tabs: [...s.tabs, { id, machineId, title }],
+        activeTabId: id,
+        sidebarOpen: false,
+      }
+    })
   },
 
   closeTab: (tabId) => {
-    // session:close is sent by useTerminalWs cleanup when component unmounts
     set(s => {
       const tabs = s.tabs.filter(t => t.id !== tabId)
       const activeTabId = s.activeTabId === tabId
         ? (tabs[tabs.length - 1]?.id ?? null)
         : s.activeTabId
-      return { tabs, activeTabId }
+      return {
+        tabs,
+        activeTabId,
+        sidebarOpen: tabs.length === 0 ? true : s.sidebarOpen,  // 无终端时自动展开
+        previewVisible: tabs.length === 0 ? false : s.previewVisible,
+      }
     })
   },
 
@@ -86,8 +98,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, _get) => ({
   },
 
   setActiveSplitTab: (tabId) => set({ activeSplitTabId: tabId }),
-
   setSplitMode: (mode) => set({ splitMode: mode }),
-
   togglePreview: () => set(s => ({ previewVisible: !s.previewVisible })),
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
 }))

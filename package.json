@@ -17,7 +17,9 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:service": "esbuild src/service/index.ts --bundle --platform=node --external:keytar --external:*.node --outfile=out/service/index.js",
+    "build:mac": "npm run build:service && electron-vite build && electron-builder --mac --dir && npm run sign:mac && electron-builder --mac dmg --prepackaged dist/mac-arm64/HelloWork.app",
+    "sign:mac": "APP=dist/mac-arm64/HelloWork.app && find \"$APP\" -name '*.dylib' | xargs -I{} codesign --force --sign - {} && find \"$APP/Contents/Frameworks\" -name '*.app' | xargs -I{} codesign --force --sign - {} && codesign --force --sign - \"$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework\" && codesign --force --sign - \"$APP/Contents/Frameworks/Electron Framework.framework\" && find \"$APP/Contents/Frameworks\" -maxdepth 1 -name '*.framework' ! -name 'Electron Framework.framework' | xargs -I{} codesign --force --sign - {} && codesign --force --sign - \"$APP\"",
     "build:linux": "electron-vite build && electron-builder --linux",
     "test": "vitest run",
     "test:watch": "vitest"

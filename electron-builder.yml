@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: 'y'
+appId: com.hellowork.app
+productName: 'HelloWork'
 directories:
   buildResources: build
 files:
@@ -11,8 +11,12 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  - node_modules/keytar/**
+extraResources:
+  - from: out/service
+    to: service
 win:
-  executableName: 'y'
+  executableName: 'hellowork'
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

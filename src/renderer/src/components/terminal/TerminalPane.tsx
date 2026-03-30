@@ -18,7 +18,7 @@ export function TerminalPane({ tabId, machineId, isActive }: Props) {
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const pendingRef = useRef<string[]>([])
-  const { sessionId, error, writeInput, resize } = useTerminalWs(machineId, tabId)
+  const { sessionId, error, disconnected, writeInput, resize } = useTerminalWs(machineId, tabId)
   const onMessage = useServiceStore(s => s.onMessage)
 
   useEffect(() => {
@@ -28,6 +28,8 @@ export function TerminalPane({ tabId, machineId, isActive }: Props) {
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 10000,
+      allowProposedApi: true,
+      macOptionIsMeta: true,
     })
     const webgl = new WebglAddon()
     const fit = new FitAddon()
@@ -79,6 +81,12 @@ export function TerminalPane({ tabId, machineId, isActive }: Props) {
       }
     }
   }, [isActive])
+
+  useEffect(() => {
+    if (disconnected && termRef.current) {
+      termRef.current.write('\r\n\x1b[31m--- 连接已断开 ---\x1b[0m\r\n')
+    }
+  }, [disconnected])
 
   if (error) {
     return (

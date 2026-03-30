@@ -2,6 +2,8 @@
 import { ChildProcess, fork } from 'child_process'
 import { join } from 'path'
 import { app } from 'electron'
+import { appendFileSync, mkdirSync } from 'fs'
+import { homedir } from 'os'
 
 export class ServiceManager {
   private proc: ChildProcess | null = null
@@ -14,7 +16,11 @@ export class ServiceManager {
         ? join(__dirname, '../../src/service/index.ts')
         : join(process.resourcesPath, 'service/index.js')
 
-      const execArgv = isDev ? ['--import', 'tsx/esm'] : []
+      const execArgv = isDev ? ['--require', 'tsx/cjs'] : []
+
+      const logDir = join(homedir(), '.hellowork')
+      const logFile = join(logDir, 'service.log')
+      try { mkdirSync(logDir, { recursive: true }) } catch {}
 
       this.proc = fork(servicePath, [], {
         execArgv,
@@ -24,6 +30,7 @@ export class ServiceManager {
 
       this.proc.stdout?.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
+        try { appendFileSync(logFile, `[stdout] ${text}`) } catch {}
         const match = text.match(/PORT:(\d+)/)
         if (match && !this._port) {
           this._port = parseInt(match[1])
@@ -32,7 +39,9 @@ export class ServiceManager {
       })
 
       this.proc.stderr?.on('data', (chunk: Buffer) => {
-        console.error('[service]', chunk.toString())
+        const text = chunk.toString()
+        console.error('[service]', text)
+        try { appendFileSync(logFile, `[stderr] ${text}`) } catch {}
       })
 
       this.proc.on('error', reject)

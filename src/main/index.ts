@@ -1,5 +1,5 @@
 // src/main/index.ts
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron'
 import { join } from 'path'
 import { ServiceManager } from './service-manager'
 import keytar from 'keytar'
@@ -22,6 +22,10 @@ async function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  globalShortcut.register('CommandOrControl+Option+I', () => {
+    win.webContents.toggleDevTools()
+  })
 }
 
 app.whenReady().then(async () => {

@@ -5,7 +5,11 @@ import { MachineItem } from './MachineItem'
 import { MachineForm } from '../machines/MachineForm'
 import { MachineConfig } from '../../../../service/types'
 
-export const Sidebar = memo(function Sidebar() {
+interface Props {
+  onCollapse: () => void
+}
+
+export const Sidebar = memo(function Sidebar({ onCollapse }: Props) {
   const { machines } = useMachinesStore()
   const [showForm, setShowForm] = useState(false)
   const [editingMachine, setEditingMachine] = useState<MachineConfig | undefined>()
@@ -19,9 +23,16 @@ export const Sidebar = memo(function Sidebar() {
       display: 'flex', flexDirection: 'column', height: '100%', flexShrink: 0
     }}>
       <div style={{
-        padding: '12px 12px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+        padding: '8px 8px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
-        <span style={{ color: '#888', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>机器</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={onCollapse}
+            title="折叠"
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 14, padding: '2px 4px', lineHeight: 1 }}
+          >☰</button>
+          <span style={{ color: '#888', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>机器</span>
+        </div>
         <button
           onClick={openAdd}
           title="添加机器"
