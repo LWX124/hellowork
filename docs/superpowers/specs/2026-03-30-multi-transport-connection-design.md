@@ -27,8 +27,14 @@ State transitions:
 - `reconnecting → connected`: reconnect attempt succeeds (user sees no interruption)
 - `reconnecting → failed`: retry count exceeds limit across all transports
 
-The renderer only sees: `connecting | connected | reconnecting | failed | disconnected`.
+The renderer sees: `connecting | connected | reconnecting | failed | disconnected`.
 `reconnecting` is NOT shown as `error` — it shows a spinner with "重新连接中...".
+
+**Type changes required (both files must be updated together):**
+- `src/service/types.ts` line 26: add `'reconnecting' | 'failed'` to the `connection:status` status union
+- `src/renderer/src/store/machines.ts` line 11: add `'reconnecting' | 'failed'` to `ConnectionStatus` type
+- `machines.ts` `connection:status` handler: add explicit `case 'reconnecting':` branch that only sets status — no Keychain logic, no toast, no error clearing
+- `machines.ts` `connection:status` handler: add explicit `case 'failed':` branch that sets status and shows toast
 
 ---
 
@@ -66,8 +72,8 @@ Wraps existing `ConnectionPool` + `SessionManager`. Changes from current:
 
 Spawns `mosh` CLI as a child process. Mosh handles its own UDP connection and session persistence.
 
-- `isAvailable`: checks `which mosh` on local machine. If not found, logs warning and skips.
-- Connection: `mosh --ssh="ssh -p <port>" <user>@<host>`
+- `isAvailable`: checks for mosh binary at known Homebrew paths before falling back to `which`. On macOS, Electron subprocesses do not inherit the user's shell PATH. Check in order: `/opt/homebrew/bin/mosh` (Apple Silicon), `/usr/local/bin/mosh` (Intel), then `which mosh` via `launchctl getenv PATH` (same pattern as existing `getSshAuthSock()`). If not found, log warning and skip.
+- Connection: `mosh --ssh="ssh -p <port>" <user>@<host>` using the resolved binary path
 - Shell I/O: pipe child process stdin/stdout to `IShell` interface
 - Mosh automatically starts `mosh-server` on the remote — no manual remote setup needed beyond having mosh installed
 - Remote requirement: `mosh` installed (`brew install mosh` on macOS)
@@ -79,9 +85,10 @@ App startup check: if `mosh` not found locally, show one-time notification in si
 
 Connects to a ttyd WebSocket server running on the remote machine.
 
-- `isAvailable`: attempts HTTP GET to `http://<host>:7681/` with 3s timeout
+- `isAvailable`: attempts HTTP GET to `http://<host>:7681/` with 3s timeout. Returns true only on 2xx response.
+- Remote setup: ttyd must be running. `TtydTransport.connect()` first attempts to start it via a short-lived SSH connection (separate from the main transport): `ssh <host> 'pgrep ttyd || nohup ttyd -p 7681 -W bash &>/dev/null &'`. This SSH connection is only used for the start command and is closed immediately. If SSH is completely unavailable, ttyd start is skipped and `isAvailable` check determines whether to proceed.
+- Note: the "SSH partially works" scenario from earlier drafts is removed. ttyd auto-start via SSH only applies when SSH can establish a connection long enough to run a single command, even if it cannot sustain a PTY session. If SSH cannot connect at all, ttyd must already be running on the remote.
 - Protocol: ttyd JSON WebSocket protocol (input/output/resize message types)
-- Remote setup: ttyd must be running. ConnectionManager can auto-start it via SSH before switching: `ssh <host> 'nohup ttyd -p 7681 -W bash &>/dev/null &'`
 - Does NOT use webview — connects via WebSocket in the service process, feeds data to existing xterm.js pipeline
 
 ---
@@ -111,10 +118,26 @@ On `transport:disconnected` event:
 1. Set machine status to `reconnecting`
 2. Try same transport first (network blip)
 3. If fails twice, try next transport in priority order
-4. On success: emit `connection:status connected`, auto-create new session
+4. On success: emit `connection:status connected`, auto-create new session via `session:replaced` message
 5. Terminal writes: `\r\n\x1b[33m--- 重新连接中... ---\x1b[0m\r\n` on disconnect, `\r\n\x1b[32m--- 已恢复 ---\x1b[0m\r\n` on reconnect
 
-Session recovery: `ConnectionManager` stores last `{cols, rows}` and re-runs `session:create` automatically after reconnect. The renderer's `useTerminalWs` hook handles the new `sessionId` transparently.
+**Session recovery protocol:**
+
+When `ConnectionManager` reconnects and creates a new session, it emits a new message type:
+
+```typescript
+{ type: 'session:replaced'; oldSessionId: string; newSessionId: string; machineId: string }
+```
+
+`useTerminalWs` handles `session:replaced`:
+- Does NOT set `disconnected = true` when `connection:status reconnecting` arrives (only set on `disconnected` or `error`)
+- On `session:replaced` where `machineId` matches: update `sessionIdRef.current` to `newSessionId`, call `setSessionId(newSessionId)`, call `setTabSessionId(tabId, newSessionId)`
+- The old session is already closed server-side; no `session:close` needed from renderer
+
+`ConnectionManager` stores last `{cols, rows}` from resize events and passes them to the new session on creation.
+
+**Background transport upgrade:**
+Once connected via Mosh or ttyd, retry SSH every 60s. On SSH success, emit `session:replaced` with the new SSH session ID. The terminal shows a brief `\r\n\x1b[33m--- 已切换至 SSH ---\x1b[0m\r\n` message. The old transport session is closed after the new one is confirmed.
 
 ---
 
@@ -123,25 +146,35 @@ Session recovery: `ConnectionManager` stores last `{cols, rows}` and re-runs `se
 **Current:** Preview opens SSH tunnel → `http://127.0.0.1:<localPort>`
 **New:** Preview uses `http://<machine.host>:<remotePort>` directly (Tailscale IP is routable)
 
-Fallback: if direct HTTP fails (non-Tailscale network), fall back to SSH tunnel as before.
+**Detection mechanism:**
+1. When user clicks "预览", `PreviewPane` sends a new IPC message `preview:probe` to the service with `{ machineId, remotePort }`
+2. Service does a `fetch('http://<host>:<port>/', { signal: AbortSignal.timeout(3000) })`
+3. On any response (including 4xx/5xx — server is reachable): return `{ type: 'preview:probe:result', url: 'http://<host>:<port>' }`
+4. On network error / timeout: fall back to `tunnel:open` as before, return `{ type: 'preview:probe:result', url: 'http://localhost:<localPort>' }`
+5. `PreviewPane` loads the URL from the probe result
 
-Changes:
-- `PreviewPane` / tunnel open logic: try direct URL first, fall back to tunnel
-- `TunnelManager` kept as-is for fallback
-- No SSH dependency for the happy path
+Fallback: if direct HTTP fails (ECONNREFUSED, timeout, network error), fall back to SSH tunnel as before. `TunnelManager` kept as-is.
+
+**New message types:**
+```typescript
+{ type: 'preview:probe'; machineId: string; remotePort: number }
+{ type: 'preview:probe:result'; url: string; via: 'direct' | 'tunnel' }
+```
 
 ---
 
 ## 6. UI Changes
 
 ### MachineItem (sidebar)
-- Status badge shows transport name when connected: `SSH` / `Mosh` / `ttyd`
-- `reconnecting` state: spinner + "重新连接中" text, NOT red error color
-- One-time mosh install hint if mosh unavailable
+- `statusColors` and `statusLabels` maps must include `reconnecting` (yellow, "重新连接中...") and `failed` (red, "连接失败")
+- `reconnecting` state: spinner + "重新连接中" text, NOT red error color; show disconnect button so user can force-stop the reconnect loop
+- `connected` state: show transport badge (SSH / Mosh / ttyd) — service emits active transport name in `connection:status connected` message via new optional field `transport?: 'ssh' | 'mosh' | 'ttyd'`
+- One-time mosh install hint if mosh unavailable (shown once per app session, dismissible)
 
 ### TerminalPane
-- On `reconnecting`: write yellow "重新连接中..." message to terminal
-- On `reconnected`: write green "已恢复" message
+- On `reconnecting` status: write yellow "重新连接中..." message to terminal; do NOT set `disconnected = true`
+- On `session:replaced`: update sessionId ref, write green "已恢复" message, continue xterm.js session
+- On `disconnected` or `error` (final): set `disconnected = true`, write red "连接已断开" as before
 - No other UI changes — xterm.js session continues seamlessly
 
 ---
@@ -150,7 +183,21 @@ Changes:
 
 No schema changes needed. Transport selection is automatic based on availability.
 
-Optional future addition: `preferredTransport?: 'ssh' | 'mosh' | 'ttyd'` per machine — not in scope for this implementation.
+`connection:status` message gains an optional field:
+```typescript
+{ type: 'connection:status'; machineId: string; status: ...; message?: string; transport?: 'ssh' | 'mosh' | 'ttyd' }
+```
+
+New message types added to `types.ts`:
+```typescript
+// Session recovery after reconnect
+{ type: 'session:replaced'; oldSessionId: string; newSessionId: string; machineId: string }
+// Preview direct-access probe
+{ type: 'preview:probe'; machineId: string; remotePort: number }
+{ type: 'preview:probe:result'; url: string; via: 'direct' | 'tunnel' }
+```
+
+Open tunnels during reconnect: when `ConnectionManager` reconnects, it emits a `tunnel:reconnected` event internally. `TunnelManager` re-establishes any tunnels that were open on the previous SSH client using the new client. If re-establishment fails, the tunnel is closed and `tunnel:error` is emitted to the renderer so `PreviewPane` can show an error and prompt the user to re-open.
 
 ---
 
