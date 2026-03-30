@@ -7,6 +7,7 @@ const makeStream = () => ({
   setWindow: vi.fn(),
   on: vi.fn().mockReturnThis(),
   destroy: vi.fn(),
+  stderr: { on: vi.fn() },
 })
 
 const makeClient = (stream = makeStream()) => ({
