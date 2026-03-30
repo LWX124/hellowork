@@ -13,13 +13,6 @@ import { randomUUID } from 'crypto'
 const store = new MachinesStore(join(homedir(), '.hellowork', 'machines.json'))
 const tunnels = new TunnelManager()
 
-// One ConnectionManager per machine
-const managers = new Map<string, ConnectionManager>()
-// sessionId → IShell (for terminal:input and terminal:resize)
-const shellMap = new Map<string, IShell>()
-// sessionId → machineId (for resize routing)
-const sessionMachineMap = new Map<string, string>()
-
 const server = http.createServer()
 const wss = new WebSocketServer({ server })
 
@@ -29,56 +22,67 @@ function send(ws: WebSocket, msg: ServerMessage) {
   }
 }
 
-function getOrCreateManager(machineId: string, ws: WebSocket): ConnectionManager | null {
-  const machine = store.getById(machineId)
-  if (!machine) return null
+wss.on('connection', (ws) => {
+  // One ConnectionManager per machine, scoped to this connection
+  const managers = new Map<string, ConnectionManager>()
+  // sessionId → IShell (for terminal:input and terminal:resize)
+  const shellMap = new Map<string, IShell>()
+  // sessionId → machineId (for resize routing)
+  const sessionMachineMap = new Map<string, string>()
 
-  let manager = managers.get(machineId)
-  if (!manager) {
-    manager = new ConnectionManager(machine)
-    managers.set(machineId, manager)
+  function getOrCreateManager(machineId: string): ConnectionManager | null {
+    const machine = store.getById(machineId)
+    if (!machine) return null
 
-    manager.on('status', (statusMsg: { status: string; transport?: string }) => {
-      send(ws, {
-        type: 'connection:status',
-        machineId,
-        status: statusMsg.status as any,
-        transport: statusMsg.transport as any,
+    let manager = managers.get(machineId)
+    if (!manager) {
+      manager = new ConnectionManager(machine)
+      managers.set(machineId, manager)
+
+      manager.on('status', (statusMsg: { status: string; transport?: string }) => {
+        send(ws, {
+          type: 'connection:status',
+          machineId,
+          status: statusMsg.status as any,
+          transport: statusMsg.transport as any,
+        })
       })
-    })
 
-    manager.on('session:replaced', (msg: { oldSessionId: string; newSessionId: string; machineId: string }) => {
-      // Move the shell from old session to new session
-      const shell = shellMap.get(msg.oldSessionId)
-      if (shell) {
-        shellMap.delete(msg.oldSessionId)
-        shellMap.set(msg.newSessionId, shell)
-      }
-      // Move the machine mapping too
-      if (sessionMachineMap.has(msg.oldSessionId)) {
-        sessionMachineMap.delete(msg.oldSessionId)
-        sessionMachineMap.set(msg.newSessionId, msg.machineId)
-      }
-      send(ws, { type: 'session:replaced', ...msg })
-    })
+      manager.on('session:replaced', (msg: { oldSessionId: string; newSessionId: string; machineId: string }) => {
+        // Move the shell from old session to new session
+        const shell = shellMap.get(msg.oldSessionId)
+        if (shell) {
+          shellMap.delete(msg.oldSessionId)
+          shellMap.set(msg.newSessionId, shell)
+        }
+        // Move the machine mapping too
+        if (sessionMachineMap.has(msg.oldSessionId)) {
+          sessionMachineMap.delete(msg.oldSessionId)
+          sessionMachineMap.set(msg.newSessionId, msg.machineId)
+        }
+        send(ws, { type: 'session:replaced', ...msg })
+      })
 
-    manager.on('terminal:message', (data: string) => {
-      // Send to the current session
-      const sessionId = manager!.getCurrentSessionId()
-      if (sessionId) {
-        send(ws, { type: 'terminal:output', sessionId, data })
-      }
-    })
+      manager.on('terminal:message', (data: string) => {
+        // Send to the current session
+        const sessionId = manager!.getCurrentSessionId()
+        if (sessionId) {
+          send(ws, { type: 'terminal:output', sessionId, data })
+        }
+      })
 
-    manager.on('mosh:unavailable', () => {
-      send(ws, { type: 'mosh:unavailable' })
-    })
+      manager.on('mosh:unavailable', () => {
+        send(ws, { type: 'mosh:unavailable' })
+      })
+    }
+
+    return manager
   }
 
-  return manager
-}
+  ws.on('close', () => {
+    for (const [, m] of managers) m.disconnect()
+  })
 
-wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     let msg: ClientMessage
     try {
@@ -95,7 +99,7 @@ wss.on('connection', (ws) => {
           return
         }
 
-        const manager = getOrCreateManager(msg.machineId, ws)!
+        const manager = getOrCreateManager(msg.machineId)!
         if (manager.getState() !== 'connected') {
           await manager.connect()
           // Wait for connected state
@@ -187,7 +191,7 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'connection:status', machineId: msg.machineId, status: 'error', message: 'Machine not found' })
           return
         }
-        const manager = getOrCreateManager(msg.machineId, ws)!
+        const manager = getOrCreateManager(msg.machineId)!
         if (manager.getState() === 'connected' || manager.getState() === 'connecting') {
           send(ws, { type: 'connection:status', machineId: msg.machineId, status: manager.getState() as any })
           return
@@ -220,7 +224,6 @@ server.listen(0, '127.0.0.1', () => {
 })
 
 process.on('SIGTERM', () => {
-  for (const [, manager] of managers) manager.disconnect()
   tunnels.closeAll()
   server.close(() => process.exit(0))
 })
