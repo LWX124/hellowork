@@ -134,11 +134,15 @@ export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props)
               >⏹</button>
             </>
           ) : status === 'reconnecting' ? (
-            <button
-              title="停止重连"
-              onClick={() => disconnectMachine(machine.id)}
-              style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14, padding: '2px 4px' }}
-            >⏹</button>
+            <>
+              <span style={{ color: '#e5c07b', fontSize: 12, animation: 'spin 1s linear infinite' }}>↻</span>
+              <span style={{ color: '#e5c07b', fontSize: 11 }}>重新连接中</span>
+              <button
+                title="停止重连"
+                onClick={() => disconnectMachine(machine.id)}
+                style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14, padding: '2px 4px' }}
+              >⏹</button>
+            </>
           ) : status === 'failed' ? (
             <button
               title="重新连接"
