@@ -16,6 +16,7 @@ export type ClientMessage =
   // 主机指纹确认
   | { type: 'hostkey:approve'; machineId: string }
   | { type: 'hostkey:reject'; machineId: string }
+  | { type: 'preview:probe'; machineId: string; remotePort: number }
 
 export type ServerMessage =
   | { type: 'session:created'; sessionId: string; requestId: string }
@@ -32,7 +33,7 @@ export type ServerMessage =
   | { type: 'hostkey:verify'; machineId: string; host: string; fingerprint: string }
   | { type: 'session:replaced'; oldSessionId: string; newSessionId: string; machineId: string }
   | { type: 'mosh:unavailable' }
-  | { type: 'preview:probe:result'; url: string; via: 'direct' | 'tunnel' }
+  | { type: 'preview:probe:result'; url: string | null; via: 'direct' | 'tunnel' }
 
 export interface MachineConfig {
   id: string

@@ -18,6 +18,7 @@ interface MachinesState {
   pendingHostKey: { machineId: string; host: string; fingerprint: string } | null
   pendingPassword: { machineId: string; machineName: string } | null
   moshUnavailable: boolean
+  moshHintDismissed: boolean
   init: () => (() => void)
   saveMachine: (machine: MachineConfig) => void
   deleteMachine: (id: string) => void
@@ -38,6 +39,7 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
   pendingHostKey: null,
   pendingPassword: null,
   moshUnavailable: false,
+  moshHintDismissed: false,
 
   init: () => {
     const { send, onMessage } = useServiceStore.getState()
@@ -194,5 +196,5 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
     })
   },
 
-  dismissMoshHint: () => set({ moshUnavailable: false }),
+  dismissMoshHint: () => set({ moshHintDismissed: true }),
 }))

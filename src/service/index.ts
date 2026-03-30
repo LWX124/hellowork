@@ -232,7 +232,7 @@ wss.on('connection', (ws) => {
       case 'preview:probe': {
         const machine = store.getById(msg.machineId)
         if (!machine) {
-          send(ws, { type: 'preview:probe:result', url: '', via: 'tunnel' })
+          send(ws, { type: 'preview:probe:result', url: null, via: 'tunnel' })
           return
         }
         try {
@@ -246,14 +246,14 @@ wss.on('connection', (ws) => {
           const manager = managers.get(msg.machineId)
           const client = manager?.getActiveSshClient()
           if (!client) {
-            send(ws, { type: 'preview:probe:result', url: '', via: 'tunnel' })
+            send(ws, { type: 'preview:probe:result', url: null, via: 'tunnel' })
             return
           }
           try {
             const { tunnelId, localPort } = await tunnels.open(client, msg.machineId, msg.remotePort)
             send(ws, { type: 'preview:probe:result', url: `http://localhost:${localPort}`, via: 'tunnel' })
           } catch (err: any) {
-            send(ws, { type: 'tunnel:error', tunnelId: '', message: err.message })
+            send(ws, { type: 'preview:probe:result', url: null, via: 'tunnel' })
           }
         }
         break

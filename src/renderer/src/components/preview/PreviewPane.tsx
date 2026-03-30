@@ -7,6 +7,7 @@ import { toast } from '../common/Toast'
 export function PreviewPane() {
   const [portInput, setPortInput] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [probeError, setProbeError] = useState(false)
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const { send, onMessage } = useServiceStore()
@@ -17,12 +18,15 @@ export function PreviewPane() {
       if (msg.type === 'preview:probe:result') {
         if (msg.url) {
           setPreviewUrl(msg.url)
+          setProbeError(false)
         } else {
-          toast.error('无法访问预览地址')
+          setProbeError(true)
+          setPreviewUrl(null)
         }
       }
       if (msg.type === 'tunnel:error') {
         toast.error(`端口转发失败：${msg.message}`)
+        setProbeError(true)
         setPreviewUrl(null)
       }
     })
@@ -39,6 +43,7 @@ export function PreviewPane() {
       toast.error('请选择机器')
       return
     }
+    setProbeError(false)
     send({ type: 'preview:probe', machineId: activeMachineId, remotePort: port })
   }
 
@@ -116,6 +121,17 @@ export function PreviewPane() {
             src={previewUrl}
             style={{ width: '100%', height: '100%' }}
           />
+        ) : probeError ? (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            height: '100%', color: '#888', fontSize: 13, gap: 12
+          }}>
+            <span>无法访问预览地址</span>
+            <button
+              style={{ ...btnStyle }}
+              onClick={() => { setProbeError(false); handleOpen() }}
+            >重新打开</button>
+          </div>
         ) : (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',

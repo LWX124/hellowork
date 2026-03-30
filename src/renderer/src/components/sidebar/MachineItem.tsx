@@ -28,7 +28,7 @@ const statusLabels: Record<ConnectionStatus, string> = {
 }
 
 export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props) {
-  const { statuses, errorMessages, connectMachine, disconnectMachine, deleteMachine, transports, machines, moshUnavailable, dismissMoshHint } = useMachinesStore()
+  const { statuses, errorMessages, connectMachine, disconnectMachine, deleteMachine, transports, machines, moshUnavailable, moshHintDismissed, dismissMoshHint } = useMachinesStore()
   const { addTab, addSplitTab, splitMode } = useWorkspaceStore()
   const status = statuses[machine.id] ?? 'disconnected'
   const errorMsg = errorMessages[machine.id]
@@ -61,7 +61,7 @@ export const MachineItem = memo(function MachineItem({ machine, onEdit }: Props)
 
   return (
     <>
-      {moshUnavailable && isFirstMachine && (
+      {moshUnavailable && !moshHintDismissed && isFirstMachine && (
         <div style={{
           background: '#2a2d2e', border: '1px solid #3e3e3e', borderRadius: 4,
           padding: '6px 10px', margin: '4px 0', fontSize: 11, color: '#888',
