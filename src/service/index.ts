@@ -1,18 +1,24 @@
 // src/service/index.ts
 import { WebSocketServer, WebSocket } from 'ws'
 import * as http from 'http'
-import { ConnectionPool } from './ssh/connection-pool'
-import { SessionManager } from './ssh/session'
+import { ConnectionManager } from './connection/ConnectionManager'
+import { IShell } from './connection/ITransport'
 import { TunnelManager } from './ssh/tunnel'
 import { MachinesStore } from './store/machines'
 import { ClientMessage, ServerMessage } from './types'
 import { homedir } from 'os'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 
 const store = new MachinesStore(join(homedir(), '.hellowork', 'machines.json'))
-const pool = new ConnectionPool()
-const sessions = new SessionManager()
 const tunnels = new TunnelManager()
+
+// One ConnectionManager per machine
+const managers = new Map<string, ConnectionManager>()
+// sessionId → IShell (for terminal:input and terminal:resize)
+const shellMap = new Map<string, IShell>()
+// sessionId → machineId (for resize routing)
+const sessionMachineMap = new Map<string, string>()
 
 const server = http.createServer()
 const wss = new WebSocketServer({ server })
@@ -21,6 +27,55 @@ function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg))
   }
+}
+
+function getOrCreateManager(machineId: string, ws: WebSocket): ConnectionManager | null {
+  const machine = store.getById(machineId)
+  if (!machine) return null
+
+  let manager = managers.get(machineId)
+  if (!manager) {
+    manager = new ConnectionManager(machine)
+    managers.set(machineId, manager)
+
+    manager.on('status', (statusMsg: { status: string; transport?: string }) => {
+      send(ws, {
+        type: 'connection:status',
+        machineId,
+        status: statusMsg.status as any,
+        transport: statusMsg.transport as any,
+      })
+    })
+
+    manager.on('session:replaced', (msg: { oldSessionId: string; newSessionId: string; machineId: string }) => {
+      // Move the shell from old session to new session
+      const shell = shellMap.get(msg.oldSessionId)
+      if (shell) {
+        shellMap.delete(msg.oldSessionId)
+        shellMap.set(msg.newSessionId, shell)
+      }
+      // Move the machine mapping too
+      if (sessionMachineMap.has(msg.oldSessionId)) {
+        sessionMachineMap.delete(msg.oldSessionId)
+        sessionMachineMap.set(msg.newSessionId, msg.machineId)
+      }
+      send(ws, { type: 'session:replaced', ...msg })
+    })
+
+    manager.on('terminal:message', (data: string) => {
+      // Send to the current session
+      const sessionId = manager!.getCurrentSessionId()
+      if (sessionId) {
+        send(ws, { type: 'terminal:output', sessionId, data })
+      }
+    })
+
+    manager.on('mosh:unavailable', () => {
+      send(ws, { type: 'mosh:unavailable' })
+    })
+  }
+
+  return manager
 }
 
 wss.on('connection', (ws) => {
@@ -39,25 +94,30 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: 'Machine not found' })
           return
         }
-        if (pool.getStatus(msg.machineId) !== 'connected') {
-          pool.connect(machine, (machineId, status, message) => {
-            send(ws, { type: 'connection:status', machineId, status, message })
-          })
+
+        const manager = getOrCreateManager(msg.machineId, ws)!
+        if (manager.getState() !== 'connected') {
+          await manager.connect()
+          // Wait for connected state
           let waited = 0
-          while (pool.getStatus(msg.machineId) !== 'connected' && waited < 15000) {
+          while (manager.getState() !== 'connected' && manager.getState() !== 'failed' && waited < 30000) {
             await new Promise(r => setTimeout(r, 200))
             waited += 200
           }
         }
-        const client = pool.getClient(msg.machineId)
-        if (!client) {
+
+        if (manager.getState() !== 'connected') {
           send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: 'Connection failed' })
           return
         }
+
+        const sessionId = `sess-${randomUUID()}`
         try {
-          const sessionId = await sessions.create(client, msg.machineId, (sid, data) => {
-            send(ws, { type: 'terminal:output', sessionId: sid, data })
-          })
+          const shell = await manager.createShell((data) => {
+            send(ws, { type: 'terminal:output', sessionId, data })
+          }, sessionId)
+          shellMap.set(sessionId, shell)
+          sessionMachineMap.set(sessionId, msg.machineId)
           send(ws, { type: 'session:created', sessionId, requestId: msg.requestId })
         } catch (err: any) {
           send(ws, { type: 'session:error', sessionId: '', requestId: msg.requestId, message: err.message })
@@ -65,22 +125,31 @@ wss.on('connection', (ws) => {
         break
       }
 
-      case 'session:close':
-        sessions.close(msg.sessionId)
+      case 'session:close': {
+        const shell = shellMap.get(msg.sessionId)
+        shell?.close()
+        shellMap.delete(msg.sessionId)
+        sessionMachineMap.delete(msg.sessionId)
         break
+      }
 
-      case 'terminal:input':
-        sessions.write(msg.sessionId, msg.data)
+      case 'terminal:input': {
+        shellMap.get(msg.sessionId)?.write(msg.data)
         break
+      }
 
-      case 'terminal:resize':
-        sessions.resize(msg.sessionId, msg.cols, msg.rows)
+      case 'terminal:resize': {
+        shellMap.get(msg.sessionId)?.resize(msg.cols, msg.rows)
+        const machineId = sessionMachineMap.get(msg.sessionId)
+        if (machineId) managers.get(machineId)?.setDimensions(msg.cols, msg.rows)
         break
+      }
 
       case 'tunnel:open': {
-        const client = pool.getClient(msg.machineId)
+        const manager = managers.get(msg.machineId)
+        const client = manager?.getActiveSshClient()
         if (!client) {
-          send(ws, { type: 'tunnel:error', tunnelId: '', message: 'Not connected' })
+          send(ws, { type: 'tunnel:error', tunnelId: '', message: 'Not connected via SSH' })
           return
         }
         try {
@@ -107,8 +176,8 @@ wss.on('connection', (ws) => {
 
       case 'machine:delete':
         store.delete(msg.id)
-        sessions.closeForMachine(msg.id)
-        pool.disconnect(msg.id)
+        managers.get(msg.id)?.disconnect()
+        managers.delete(msg.id)
         send(ws, { type: 'machine:deleted', id: msg.id })
         break
 
@@ -118,29 +187,28 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'connection:status', machineId: msg.machineId, status: 'error', message: 'Machine not found' })
           return
         }
-        if (pool.getStatus(msg.machineId) === 'connected' || pool.getStatus(msg.machineId) === 'connecting') {
-          send(ws, { type: 'connection:status', machineId: msg.machineId, status: pool.getStatus(msg.machineId) as any })
+        const manager = getOrCreateManager(msg.machineId, ws)!
+        if (manager.getState() === 'connected' || manager.getState() === 'connecting') {
+          send(ws, { type: 'connection:status', machineId: msg.machineId, status: manager.getState() as any })
           return
         }
-        pool.connect(machine, (machineId: string, status: any, message?: string) => {
-          send(ws, { type: 'connection:status', machineId, status, message })
-        }, msg.password,
-        (machineId: string, host: string, fingerprint: string) => {
-          send(ws, { type: 'hostkey:verify', machineId, host, fingerprint })
-        })
+        manager.connect().catch(() => {})
         break
       }
 
-      case 'machine:disconnect':
-        pool.disconnect(msg.machineId)
+      case 'machine:disconnect': {
+        const manager = managers.get(msg.machineId)
+        if (manager) {
+          manager.disconnect()
+          send(ws, { type: 'connection:status', machineId: msg.machineId, status: 'disconnected' })
+        }
         break
+      }
 
+      // Host key handling is now done inside SshTransport (auto-approve for known hosts)
+      // These messages are kept for backward compatibility but are no-ops
       case 'hostkey:approve':
-        pool.approveHostKey(msg.machineId)
-        break
-
       case 'hostkey:reject':
-        pool.rejectHostKey(msg.machineId)
         break
     }
   })
@@ -152,8 +220,7 @@ server.listen(0, '127.0.0.1', () => {
 })
 
 process.on('SIGTERM', () => {
-  sessions.closeAll()
+  for (const [, manager] of managers) manager.disconnect()
   tunnels.closeAll()
-  pool.disconnectAll()
   server.close(() => process.exit(0))
 })
