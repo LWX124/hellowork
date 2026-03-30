@@ -24,7 +24,7 @@ interface MachinesState {
   disconnectMachine: (machineId: string) => void
   approveHostKey: () => void
   rejectHostKey: () => void
-  submitPassword: (password: string) => void
+  submitPassword: (password: string) => Promise<void>
   cancelPassword: () => void
 }
 
@@ -81,18 +81,27 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
               if (machine) {
                 const keychainKey = `${msg.machineId}_fallback_password`
                 if (!triedKeychainPassword.has(msg.machineId)) {
+                  // First failure — try saved Keychain password silently, don't update status yet
                   window.electronAPI.keychain.get(keychainKey).then((saved) => {
                     if (saved) {
                       triedKeychainPassword.add(msg.machineId)
                       get().connectMachine(msg.machineId, saved)
                     } else {
-                      set({ statuses: newStatuses, pendingPassword: { machineId: msg.machineId, machineName: machine.name } })
+                      // No saved password — show prompt and update status
+                      set({
+                        statuses: { ...get().statuses, [msg.machineId]: 'error' as ConnectionStatus },
+                        pendingPassword: { machineId: msg.machineId, machineName: machine.name }
+                      })
                     }
                   })
                 } else {
+                  // Keychain password also failed — clear it and prompt user
                   triedKeychainPassword.delete(msg.machineId)
                   window.electronAPI.keychain.delete(keychainKey).catch(() => {})
-                  set({ statuses: newStatuses, pendingPassword: { machineId: msg.machineId, machineName: machine.name } })
+                  set({
+                    statuses: { ...get().statuses, [msg.machineId]: 'error' as ConnectionStatus },
+                    pendingPassword: { machineId: msg.machineId, machineName: machine.name }
+                  })
                 }
                 break
               }

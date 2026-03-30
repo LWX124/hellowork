@@ -16,7 +16,6 @@ export type ClientMessage =
   // 主机指纹确认
   | { type: 'hostkey:approve'; machineId: string }
   | { type: 'hostkey:reject'; machineId: string }
-  | { type: 'preview:probe'; machineId: string; remotePort: number }
 
 export type ServerMessage =
   | { type: 'session:created'; sessionId: string; requestId: string }
