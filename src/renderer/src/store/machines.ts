@@ -74,7 +74,36 @@ export const useMachinesStore = create<MachinesState>((set, get) => ({
           }
 
           if (msg.status === 'failed') {
-            toast.error(`连接失败: ${msg.machineId}`)
+            const isAuthFailure = msg.message?.includes('authentication') || msg.message?.includes('All configured')
+            if (isAuthFailure) {
+              const machine = get().machines.find(m => m.id === msg.machineId)
+              if (machine) {
+                const keychainKey = `${msg.machineId}_fallback_password`
+                if (!triedKeychainPassword.has(msg.machineId)) {
+                  window.electronAPI.keychain.get(keychainKey).then((saved) => {
+                    if (saved) {
+                      triedKeychainPassword.add(msg.machineId)
+                      get().connectMachine(msg.machineId, saved)
+                    } else {
+                      set({
+                        statuses: { ...get().statuses, [msg.machineId]: 'error' as ConnectionStatus },
+                        pendingPassword: { machineId: msg.machineId, machineName: machine.name }
+                      })
+                    }
+                  })
+                  break
+                } else {
+                  triedKeychainPassword.delete(msg.machineId)
+                  window.electronAPI.keychain.delete(keychainKey).catch(() => {})
+                  set({
+                    statuses: { ...get().statuses, [msg.machineId]: 'error' as ConnectionStatus },
+                    pendingPassword: { machineId: msg.machineId, machineName: machine.name }
+                  })
+                  break
+                }
+              }
+            }
+            toast.error(`连接失败: ${msg.message ?? msg.machineId}`)
             set({ statuses: newStatuses })
             break
           }

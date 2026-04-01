@@ -39,12 +39,13 @@ wss.on('connection', (ws) => {
       manager = new ConnectionManager(machine)
       managers.set(machineId, manager)
 
-      manager.on('status', (statusMsg: { status: string; transport?: string }) => {
+      manager.on('status', (statusMsg: { status: string; transport?: string; message?: string }) => {
         send(ws, {
           type: 'connection:status',
           machineId,
           status: statusMsg.status as any,
           transport: statusMsg.transport as any,
+          message: statusMsg.message,
         })
       })
 

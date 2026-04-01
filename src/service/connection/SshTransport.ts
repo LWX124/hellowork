@@ -66,13 +66,11 @@ export class SshTransport extends EventEmitter implements ITransport {
           return reject(new Error(`Cannot read key: ${keyPath}`))
         }
         if (opts.passphrase) config.passphrase = opts.passphrase
-        const agentSock = getSshAuthSock()
-        if (agentSock) config.agent = agentSock
-      } else {
-        if (opts.password) config.password = opts.password
-        const agentSock = getSshAuthSock()
-        if (agentSock) config.agent = agentSock
       }
+      // Always set password if provided (fallback when key auth fails)
+      if (opts.password) config.password = opts.password
+      const agentSock = getSshAuthSock()
+      if (agentSock) config.agent = agentSock
 
       // Host key verification
       config.hostVerifier = (keyOrHash: Buffer | string, callback: (valid: boolean) => void) => {

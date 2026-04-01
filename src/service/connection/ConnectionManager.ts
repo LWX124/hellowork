@@ -11,6 +11,11 @@ type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'f
 const BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 30000]
 const MAX_FAILURES_PER_TRANSPORT = 2
 
+function isAuthError(err: Error): boolean {
+  const msg = err.message || ''
+  return msg.includes('authentication') || msg.includes('All configured')
+}
+
 export class ConnectionManager extends EventEmitter {
   private state: ConnectionState = 'idle'
   protected transports: ITransport[]
@@ -27,10 +32,9 @@ export class ConnectionManager extends EventEmitter {
     this.transports = [new SshTransport(), new MoshTransport(), new TtydTransport()]
   }
 
-  private setState(state: ConnectionState, transport?: 'ssh' | 'mosh' | 'ttyd'): void {
+  private setState(state: ConnectionState, extra?: { transport?: 'ssh' | 'mosh' | 'ttyd'; message?: string }): void {
     this.state = state
-    // transport field only set when status === 'connected' (spec §7)
-    this.emit('status', { status: state, ...(state === 'connected' ? { transport } : {}) })
+    this.emit('status', { status: state, ...extra })
   }
 
   async connect(connectOpts?: { password?: string; passphrase?: string }): Promise<void> {
@@ -40,6 +44,7 @@ export class ConnectionManager extends EventEmitter {
   }
 
   private async tryTransports(connectOpts?: { password?: string; passphrase?: string }): Promise<void> {
+    let lastError: Error | null = null
     for (const transport of this.transports) {
       const available = await transport.isAvailable(this.machine)
       if (!available) {
@@ -51,16 +56,21 @@ export class ConnectionManager extends EventEmitter {
           await transport.connect(this.machine, { ...this.lastDimensions, ...connectOpts })
           this.activeTransport = transport
           ;(transport as EventEmitter).once('transport:disconnected', () => this.onDisconnected())
-          this.setState('connected', transport.name)
+          this.setState('connected', { transport: transport.name })
           return
-        } catch {
+        } catch (err: any) {
+          lastError = err
           if (attempt < MAX_FAILURES_PER_TRANSPORT - 1) {
             await this.backoff(this.reconnectAttempts++)
           }
         }
       }
+      // If SSH auth failed, stop immediately — don't try mosh/ttyd for auth issues
+      if (transport.name === 'ssh' && lastError && isAuthError(lastError)) {
+        break
+      }
     }
-    this.setState('failed')
+    this.setState('failed', { message: lastError?.message })
   }
 
   async createShell(onData: (data: string) => void, sessionId: string): Promise<IShell> {
@@ -105,7 +115,7 @@ export class ConnectionManager extends EventEmitter {
             const oldSessionId = this.currentSessionId
             const newSessionId = randomUUID()
             this.currentSessionId = newSessionId
-            this.setState('connected', transport.name)
+            this.setState('connected', { transport: transport.name })
             this.emit('session:replaced', { oldSessionId, newSessionId, machineId: this.machine.id })
             this.emit('terminal:message', '\r\n\x1b[32m--- 已恢复 ---\x1b[0m\r\n')
             if (transport.name === 'ssh') {
@@ -144,7 +154,7 @@ export class ConnectionManager extends EventEmitter {
         this.activeTransport?.disconnect()
         this.activeTransport = sshTransport
         ;(sshTransport as EventEmitter).once('transport:disconnected', () => this.onDisconnected())
-        this.setState('connected', 'ssh')
+        this.setState('connected', { transport: 'ssh' })
         this.emit('session:replaced', { oldSessionId, newSessionId, machineId: this.machine.id })
         this.emit('terminal:message', '\r\n\x1b[33m--- 已切换至 SSH ---\x1b[0m\r\n')
         const sshClient = sshTransport.getClient()
